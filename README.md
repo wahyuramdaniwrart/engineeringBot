@@ -2,7 +2,7 @@
 
 Bot WhatsApp untuk **ticketing tugas engineering** di grup WhatsApp.
 
-```
+```text
 WhatsApp (grup engineering)
    │  pesan diawali  #  atau  /
    ▼
@@ -124,7 +124,7 @@ Job `run_waha_sync` berjalan tiap 30 detik (bisa diubah di
 Event `session.status` dari WAHA juga diterima, sehingga disconnect/reconnect
 langsung tercatat (terlihat di dashboard).
 
-### Kalau ingin configuring manual
+### Konfigurasi manual
 
 | Field | Keterangan |
 |---|---|
@@ -187,7 +187,7 @@ transisinya) — perubahan langsung dipakai bot tanpa restart.
 
 ### Status & transisi default
 
-```
+```text
 BARU ──► DIKERJAKAN ──► SELESAI
   │          │
   └──► MENUNGGU ◄┘
@@ -198,7 +198,7 @@ Status bertanda "masih dikerjakan" = kategori **belum selesai** pada ringkasan `
 
 ---
 
-## 4b. Foto / lampiran media
+## 5. Foto / lampiran media
 
 Bot bisa menerima satu atau beberapa foto yang menyertai perintah. Foto
 **diunduh dari WAHA**, disimpan di server, dicatat di database, dan ditampilkan
@@ -214,7 +214,7 @@ di dashboard.
 
 **Penyimpanan**
 
-```
+```text
 data/media/<TICKET-ID>/<20261115-142233>-kamar-203.jpg
 ```
 
@@ -233,7 +233,7 @@ Semua foto ticket ditampilkan di halaman detail ticket dashboard
 
 ---
 
-## 5. Google Sheets
+## 6. Google Sheets
 
 1. Buat project di Google Cloud Console → aktifkan **Google Sheets API**.
 2. Buat **Service Account** → unduh JSON → simpan sebagai `secrets/service-account.json`
@@ -262,7 +262,7 @@ foto tidak disinkronkan ke Sheets.
 
 ---
 
-## 6. Dashboard
+## 7. Dashboard
 
 | Halaman | Isi |
 |---|---|
@@ -278,7 +278,7 @@ dan log terkait; baris Google Sheets tidak ikut dihapus.
 
 ---
 
-## 7. Konfigurasi (`.env`)
+## 8. Konfigurasi (`.env`)
 
 | Variabel | Default | Keterangan |
 |---|---|---|
@@ -306,7 +306,7 @@ Pengaturan tambahan yang bisa diubah dari dashboard:
 
 ---
 
-## 8. Endpoint penting
+## 9. Endpoint penting
 
 | Endpoint | Keterangan |
 |---|---|
@@ -323,16 +323,16 @@ Pengaturan tambahan yang bisa diubah dari dashboard:
 
 ---
 
-## 9. Development
+## 10. Development
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests -q     # 20 test
+.venv/Scripts/python.exe -m pytest tests -q
 .venv/Scripts/python.exe -m uvicorn app.main:app --reload
 ```
 
 Struktur:
 
-```
+```text
 app/
 ├─ main.py            # FastAPI + startup
 ├─ config.py          # env + default perintah/status
@@ -346,5 +346,3 @@ app/
 ├─ scheduler.py       # APScheduler
 └─ routers/           # dashboard (web.py) + webhook.py
 ```
-#   e n g i n e e r i n g B o t  
- 
