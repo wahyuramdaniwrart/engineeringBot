@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Bot WhatsApp Engineering{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo">🤖</span>
+      <div>
+        <div class="brand-title">Bot Engineering</div>
+        <div class="brand-sub">WhatsApp Ticketing</div>
+      </div>
+    </div>
+    <nav>
+      <a href="/" class="{% block nav_dash %}{% endblock %}">📊 Dashboard</a>
+      <a href="/tickets" class="{% block nav_tickets %}{% endblock %}">🎫 Tickets</a>
+      <a href="/groups" class="{% block nav_groups %}{% endblock %}">👥 Grup</a>
+      <a href="/logs" class="{% block nav_logs %}{% endblock %}">📜 Log Pesan</a>
+      <a href="/settings" class="{% block nav_settings %}{% endblock %}">⚙️ Pengaturan</a>
+    </nav>
+    <div class="sidebar-foot">
+      <a href="/logout" class="muted">↩ Keluar</a>
+    </div>
+  </aside>
+
+  <main class="content">
+    {% block header %}{% endblock %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

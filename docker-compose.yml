@@ -1,0 +1,66 @@
+name: bot-whatsapp-engineering
+
+services:
+  # ===========================================================================
+  # WAHA - WhatsApp HTTP API (self-hosted, engine WEBJS)
+  # ===========================================================================
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: bot-waha
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - WHATSAPP_HOOK_URL=
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      # Nama session dibuat otomatis oleh aplikasi saat start.
+      - WHATSAPP_SESSION=engineering
+      - WHATSAPP_SESSION_FOLDER=/waha/sessions
+      - WHATSAPP_FILES_FOLDER=/waha/media
+      # WAHA terbaru mewajibkan API key. Nilai sama dengan BOT_WAHA_API_KEY.
+      - WHATSAPP_API_KEY=${BOT_WAHA_API_KEY:-waha-local-key}
+      # Login dashboard WAHA (http://localhost:3000)
+      - WHATSAPP_ADMIN_USERNAME=${BOT_WAHA_ADMIN_USER:-admin}
+      - WHATSAPP_ADMIN_PASSWORD=${BOT_WAHA_ADMIN_PASSWORD:-waha-admin}
+    volumes:
+      - ./data/waha:/waha/media
+      - ./data/waha/sessions:/waha/sessions
+    # Chromium (engine WEBJS) butuh /dev/shm besar, default docker 64MB
+    # sehingga halaman WhatsApp Web gagal ter-render & injeksi whatsapp-web.js timeout.
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --header=\"X-Api-Key: ${BOT_WAHA_API_KEY:-waha-local-key}\" --spider http://127.0.0.1:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ===========================================================================
+  # Aplikasi: bot + dashboard + sinkron Google Sheets
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bot-engineering-app
+    restart: unless-stopped
+    depends_on:
+      waha:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      # WAHA terbaru mewajibkan API key. Nilai yang sama dipakai kedua service.
+      - BOT_WAHA_API_KEY=${BOT_WAHA_API_KEY:-waha-local-key}
+      # Database harus di volume persisten, bukan di dalam container.
+      - BOT_DATA_DIR=/data
+      # URL aplikasi yang dipanggil WAHA saat mengirim webhook.
+      - BOT_PUBLIC_URL=${BOT_PUBLIC_URL:-http://app:8080}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+      # Service account Google diletakkan di ./secrets/service-account.json
+      - ./secrets:/secrets:ro
+      # Path yang sama juga dilmount agar BOT_GOOGLE_SA_FILE=/run/secrets/... berlaku
+      - ./secrets:/run/secrets:ro

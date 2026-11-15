@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Tickets — Bot Engineering{% endblock %}
+{% block nav_tickets %}active{% endblock %}
+
+{% block header %}
+<div class="page-head"><h1>Ticket</h1></div>
+{% endblock %}
+
+{% block content %}
+{% if deleted is not none %}
+  <div class="alert success">
+    Dihapus {{ deleted }} ticket dan {{ logs_deleted }} log terkait.
+    Google Sheets tidak diubah.
+    {% if media_errors %} {{ media_errors }} berkas media gagal dibersihkan; periksa log aplikasi.{% endif %}
+  </div>
+{% endif %}
+{% if delete_error == 'confirmation' %}
+  <div class="alert error">Penghapusan dibatalkan. Frasa konfirmasi tidak cocok.</div>
+{% endif %}
+<section class="card">
+  <form class="filter-bar" method="get" action="/tickets">
+    <input type="text" name="q" value="{{ f_q }}" placeholder="Cari judul / ID / PIC">
+    <select name="status">
+      <option value="">Semua status</option>
+      {% for st in statuses %}
+        <option value="{{ st.key }}" {% if f_status == st.key %}selected{% endif %}>{{ st.label }}</option>
+      {% endfor %}
+    </select>
+    <select name="group_id">
+      <option value="">Semua grup</option>
+      {% for g in groups %}
+        <option value="{{ g.chat_id }}" {% if f_group == g.chat_id %}selected{% endif %}>{{ g.chat_name or g.chat_id }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn primary" type="submit">Terapkan</button>
+    <a class="btn ghost" href="/tickets">Reset</a>
+  </form>
+
+  <table class="table">
+    <thead><tr><th>Foto</th><th>ID</th><th>Issue</th><th>Status</th><th>Prio</th><th>PIC</th><th>Pelapor</th><th>Grup</th><th>Dibuat</th></tr></thead>
+    <tbody>
+    {% for t in tickets %}
+      <tr>
+        <td>
+          {% if t.media_attachments %}
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            {% for photo in t.media_attachments %}
+              <a href="{{ media_url(photo.media_path) }}" target="_blank" title="Buka foto {{ t.ticket_id }} ({{ loop.index }})">
+                <img src="{{ media_url(photo.media_path) }}" alt="Foto {{ t.ticket_id }} {{ loop.index }}"
+                     style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;">
+              </a>
+            {% endfor %}
+            </div>
+          {% else %}
+            <span class="muted">-</span>
+          {% endif %}
+        </td>
+        <td><a class="link mono" href="/tickets/{{ t.ticket_id }}">{{ t.ticket_id }}</a></td>
+        <td>{{ t.detail or t.title or '-' }}</td>
+        <td><span class="badge">{{ t.status }}</span></td>
+        <td>{{ t.priority }}</td>
+        <td>{{ t.pic or '-' }}</td>
+        <td>{{ t.reporter or '-' }}</td>
+        <td class="muted small">{{ t.group_name or t.group_id or '-' }}</td>
+        <td class="muted small">{{ t.created_at|local_datetime('%d-%m-%Y %H:%M') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted">Tidak ada ticket yang cocok.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card" style="margin-top:16px;border-color:#fecaca;">
+  <h2>Hapus seluruh ticket</h2>
+  <p class="muted">
+    Menghapus semua ticket lokal, foto lampiran, dan log yang terkait.
+    Data di Google Sheets tidak diubah. Tindakan ini tidak dapat dibatalkan.
+  </p>
+  <form method="post" action="/tickets/delete-all" class="stack-sm">
+    <label for="delete-confirmation">Ketik <strong>HAPUS SEMUA TICKET</strong> untuk mengonfirmasi</label>
+    <input id="delete-confirmation" name="confirmation" type="text" required autocomplete="off">
+    <button class="btn danger" type="submit">Hapus seluruh ticket lokal</button>
+  </form>
+</section>
+{% endblock %}

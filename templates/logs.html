@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Log — Bot Engineering{% endblock %}
+{% block nav_logs %}active{% endblock %}
+
+{% block header %}
+<div class="page-head"><h1>Log Pesan</h1></div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <form class="filter-bar" method="get" action="/logs">
+    <input type="text" name="q" value="{{ f_q }}" placeholder="Cari isi pesan">
+    <label class="check"><input type="checkbox" name="only_cmd" {% if f_cmd == 'on' %}checked{% endif %}> Hanya perintah</label>
+    <button class="btn primary" type="submit">Terapkan</button>
+    <a class="btn ghost" href="/logs">Reset</a>
+  </form>
+
+  <table class="table">
+    <thead><tr><th>Waktu</th><th>Grup</th><th>Pengirim</th><th>Pesan</th><th>Perintah</th><th>Hasil</th></tr></thead>
+    <tbody>
+    {% for l in logs %}
+      <tr>
+        <td class="muted small">{{ l.created_at|local_datetime('%d-%m %H:%M:%S') }}</td>
+        <td class="small">{{ l.chat_name or l.chat_id }}</td>
+        <td class="small">{{ l.sender or l.sender_phone }}</td>
+        <td class="small">{{ l.body[:140] }}</td>
+        <td>{% if l.is_command %}<span class="badge">{{ l.command }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+        <td class="small muted">{{ l.result[:80] }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">Belum ada log.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

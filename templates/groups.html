@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Grup — Bot Engineering{% endblock %}
+{% block nav_groups %}active{% endblock %}
+
+{% block header %}
+<div class="page-head"><h1>Grup WhatsApp</h1></div>
+{% endblock %}
+
+{% block content %}
+{% if deleted %}
+  <div class="alert success">Grup dihapus dari konfigurasi bot. Riwayat ticket dan log tetap disimpan.</div>
+{% endif %}
+<section class="card">
+  <p class="muted">Grup terdaftar otomatis saat bot menerima pesan. Nonaktifkan grup
+  agar bot mengabaikan pesan dari grup tersebut. Penghapusan hanya menghapus konfigurasi
+  grup; ticket dan log tetap disimpan, dan grup dapat terdaftar kembali saat menerima perintah.</p>
+  {% if groups %}
+  <div class="stack">
+    {% for g in groups %}
+    <form class="group-card" method="post" action="/groups/{{ g.chat_id }}/update">
+      <div class="group-head">
+        <div>
+          <strong>{{ g.chat_name or '(tanpa nama)' }}</strong>
+          <div class="muted small mono">{{ g.chat_id }}</div>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" name="enabled" {% if g.enabled %}checked{% endif %}> Aktif</label>
+          <label class="check"><input type="checkbox" name="daily_summary" {% if g.daily_summary %}checked{% endif %}> Ringkasan harian</label>
+          <label class="check"><input type="checkbox" name="log_messages" {% if g.log_messages %}checked{% endif %}> Simpan log pesan</label>
+          <button class="btn primary" type="submit">Simpan</button>
+        </div>
+      </div>
+      <div class="grid-3">
+        <label>Prefix perintah (kosong = global)
+          <input type="text" name="prefixes" value="{{ g.prefixes }}" placeholder="#,/">
+        </label>
+        <label>Catatan
+          <input type="text" name="note" value="{{ g.note }}">
+        </label>
+      </div>
+    </form>
+    <form method="post" action="/groups/{{ g.chat_id }}/delete"
+          onsubmit="return confirm('Hapus grup {{ g.chat_name or g.chat_id }} dari konfigurasi bot? Riwayat ticket dan log tetap disimpan.');">
+      <button class="btn danger" type="submit">Hapus grup</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% else %}
+    <p class="muted">Belum ada grup.</p>
+  {% endif %}
+</section>
+{% endblock %}

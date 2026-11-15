@@ -1,0 +1,27 @@
+# env & secret
+.env
+secrets/
+*.pem
+
+# data runtime
+data/
+data_dev/
+data_test/
+*.db
+*.db-shm
+*.db-wal
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

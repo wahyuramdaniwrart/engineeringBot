@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Detail Ticket — Bot Engineering{% endblock %}
+{% block nav_tickets %}active{% endblock %}
+
+{% block header %}
+<div class="page-head">
+  <h1>{% if ticket %}{{ ticket.ticket_id }}{% else %}Ticket tidak ditemukan{% endif %}</h1>
+  {% if ticket %}<a class="btn ghost" href="/tickets">← Kembali</a>{% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+{% if not ticket %}
+  <section class="card"><p class="muted">Ticket yang dicari tidak ada.</p></section>
+{% else %}
+<div class="grid-2">
+  <section class="card">
+    <h2>Detail</h2>
+    <table class="table kv">
+      <tr><th>Issue</th><td>{{ ticket.detail or ticket.title or '-' }}</td></tr>
+      <tr><th>Status</th><td><span class="badge">{{ ticket.status }}</span></td></tr>
+      <tr><th>Tipe</th><td>{{ ticket.ticket_type }}</td></tr>
+      <tr><th>Prioritas</th><td>{{ ticket.priority }}</td></tr>
+      <tr><th>PIC</th><td>{{ ticket.pic or '-' }}</td></tr>
+      <tr><th>Pelapor</th><td>{{ ticket.reporter or '-' }} <span class="muted small">{{ ticket.reporter_phone }}</span></td></tr>
+      <tr><th>Grup</th><td>{{ ticket.group_name or '-' }} <span class="muted small">{{ ticket.group_id }}</span></td></tr>
+      <tr><th>Dibuat</th><td>{{ ticket.created_at|local_datetime('%d-%m-%Y %H:%M') }}</td></tr>
+      <tr><th>Diupdate</th><td>{{ ticket.updated_at|local_datetime('%d-%m-%Y %H:%M') }}</td></tr>
+      <tr><th>Ditutup</th><td>{{ ticket.closed_at|local_datetime('%d-%m-%Y %H:%M') }}</td></tr>
+      <tr><th>Resolusi</th><td>{{ ticket.resolution or '-' }}</td></tr>
+      <tr><th>Foto</th><td>{{ ticket.media_attachments|length if ticket.media_attachments else '-' }}</td></tr>
+      <tr><th>Sheets</th><td class="muted small">{{ 'baris %s' % ticket.sheet_row if ticket.sheet_row else 'belum disinkron' }}</td></tr>
+    </table>
+  </section>
+
+  <div class="stack">
+    {% if ticket.media_attachments %}
+    <section class="card">
+      <h2>Foto ({{ ticket.media_attachments|length }})</h2>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      {% for photo in ticket.media_attachments %}
+        <div style="max-width:100%;">
+          <p class="muted small">{{ photo.media_filename }}</p>
+          <a href="{{ media_url(photo.media_path) }}" target="_blank">
+            <img src="{{ media_url(photo.media_path) }}" alt="Foto ticket {{ ticket.ticket_id }} {{ loop.index }}"
+                 style="max-width:100%;max-height:420px;border-radius:8px;border:1px solid #e2e8f0;cursor:zoom-in;">
+          </a>
+          <p style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="btn ghost" href="{{ media_url(photo.media_path) }}" target="_blank">Buka ukuran penuh</a>
+            <a class="btn ghost" href="{{ media_url(photo.media_path) }}&download=1">Unduh</a>
+          </p>
+          <p class="muted small" style="margin-top:8px;word-break:break-all;">Link Foto:<br>{{ sheet_media_url(photo.media_path) }}</p>
+        </div>
+      {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+    <section class="card">
+      <h2>Ubah Status</h2>
+      <form method="post" action="/tickets/{{ ticket.ticket_id }}/status" class="stack-sm">
+        <select name="status">
+          {% for st in statuses %}
+            <option value="{{ st.key }}" {% if st.key == ticket.status %}selected{% endif %}>{{ st.label }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="note" placeholder="Catatan / resolutions (opsional)">
+        <button class="btn primary" type="submit">Simpan Status</button>
+      </form>
+      <p class="muted small">Transisi saat ini: {{ allowed|join(', ') if allowed else 'tidak ada (status final)' }}</p>
+    </section>
+
+    <section class="card">
+      <h2>Ubah PIC</h2>
+      <form method="post" action="/tickets/{{ ticket.ticket_id }}/pic" class="row">
+        <input type="text" name="pic" value="{{ ticket.pic }}" placeholder="Nama PIC">
+        <button class="btn" type="submit">Simpan</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Riwayat Perintah</h2>
+      <table class="table">
+        <thead><tr><th>Waktu</th><th>Pengirim</th><th>Pesan</th><th>Hasil</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+          <tr>
+            <td class="muted small">{{ h.created_at|local_datetime('%d-%m %H:%M') }}</td>
+            <td>{{ h.sender or '-' }}</td>
+            <td class="small">{{ h.body }}</td>
+            <td class="small muted">{{ h.result }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">Belum ada riwayat.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
