@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from datetime import datetime, timezone
+from itertools import count
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,8 @@ from app.config import DEFAULT_COMMANDS  # noqa: E402
 from app.db import get_engine, init_db, session_scope  # noqa: E402
 from app.handlers import await_send, handle_inbound, parse_waha_payload  # noqa: E402
 from app.store import list_tickets, next_ticket_id, settings_store  # noqa: E402
+
+_MESSAGE_IDS = count(1)
 
 
 @pytest.fixture(autouse=True)
@@ -39,10 +42,10 @@ def _setup(tmp_path, monkeypatch):
 def _payload(
     body: str,
     chat_id: str = "12036@g.us",
-    message_id: str = "msg-1",
+    message_id: str | None = None,
 ) -> dict:
     return {
-        "id": message_id,
+        "id": message_id or f"msg-{next(_MESSAGE_IDS)}",
         "chatId": chat_id,
         "chatName": "Unit Test",
         "from": "628123456789",
@@ -109,6 +112,190 @@ def test_ticket_appears_in_info():
     assert "tkt" in reply
 
 
+def test_detail_command_returns_ticket_and_sends_all_photos(monkeypatch):
+    from app.models import Ticket, TicketMedia
+
+    class FakeWaha:
+        def __init__(self):
+            self.images = []
+
+        def chat_name(self, _chat_id):
+            return "Unit Test"
+
+        def send_image(self, chat_id, url, **kwargs):
+            self.images.append((chat_id, url, kwargs))
+
+    fake_waha = FakeWaha()
+    monkeypatch.setattr("app.handlers.get_waha", lambda: fake_waha)
+    monkeypatch.setattr("app.handlers.await_send", lambda *_args: None)
+    settings_store.set("bot.reply_in_group", True)
+    settings_store.set("bot.public_url", "http://app:8080")
+
+    with session_scope() as s:
+        ticket = Ticket(
+            ticket_id="tkt11202681",
+            title="",
+            detail="Perbaikan AC kamar",
+            group_id="12036@g.us",
+            media_filename="ac-depan.jpg",
+            media_path="media/tkt11202681/ac-depan.jpg",
+            media_mimetype="image/jpeg",
+        )
+        ticket.media_items.extend(
+            [
+                TicketMedia(
+                    media_filename="ac-depan.jpg",
+                    media_path="media/tkt11202681/ac-depan.jpg",
+                    media_mimetype="image/jpeg",
+                ),
+                TicketMedia(
+                    media_filename="ac-belakang.jpg",
+                    media_path="media/tkt11202681/ac-belakang.jpg",
+                    media_mimetype="image/jpeg",
+                ),
+            ]
+        )
+        s.add(ticket)
+
+    msg = parse_waha_payload(_payload("#detail tkt11202681"))
+    with session_scope() as s:
+        reply = handle_inbound(s, msg)
+
+    assert "*tkt11202681*" in reply
+    assert "Perbaikan AC kamar" in reply
+    assert "2 lampiran" in reply
+    assert len(fake_waha.images) == 2
+    assert all(image[0] == "12036@g.us" for image in fake_waha.images)
+    assert all(image[1].startswith("http://app:8080/media/") for image in fake_waha.images)
+    assert fake_waha.images[1][2]["filename"] == "ac-belakang.jpg"
+
+
+def test_detail_command_without_photos_reports_no_attachments():
+    from app.models import Ticket
+
+    with session_scope() as s:
+        s.add(
+            Ticket(
+                ticket_id="tkt11202682",
+                title="",
+                detail="Lampu kamar mati",
+                group_id="12036@g.us",
+            )
+        )
+
+    msg = parse_waha_payload(_payload("#detail tkt11202682"))
+    with session_scope() as s:
+        reply = handle_inbound(s, msg)
+
+    assert "Lampu kamar mati" in reply
+    assert "Tidak ada" in reply
+
+
+def test_summary_places_counts_first_and_bolds_ticket_ids():
+    msg = parse_waha_payload(_payload("#ticket Perbaikan lampu"))
+    with session_scope() as s:
+        ticket_id = handle_inbound(s, msg)
+
+    msg2 = parse_waha_payload(_payload("#info"))
+    with session_scope() as s:
+        summary = handle_inbound(s, msg2)
+
+    assert summary.index("📌 Total: 1") < summary.index("🟡 Belum selesai: 1")
+    assert summary.index("🟡 Belum selesai: 1") < summary.index("✅ Sudah selesai / ditutup hari ini: 0")
+    assert summary.index("✅ Sudah selesai / ditutup hari ini: 0") < summary.index("🟡 Belum selesai (1):")
+    assert f"*{ticket_id}*" in summary
+
+
+def test_list_defaults_to_open_tickets_and_supports_status_filter():
+    from app.models import Ticket
+
+    with session_scope() as s:
+        s.add(Ticket(ticket_id="tkt1120261", title="Ticket terbuka", status="BARU"))
+        s.add(Ticket(ticket_id="tkt1120262", title="Ticket selesai", status="SELESAI"))
+        s.add(Ticket(ticket_id="tkt1120263", title="Ticket dibatalkan", status="DIBATALKAN"))
+
+    msg = parse_waha_payload(_payload("#list"))
+    with session_scope() as s:
+        reply = handle_inbound(s, msg)
+
+    assert "*tkt1120261*" in reply
+    assert "*tkt1120262*" not in reply
+    assert "*tkt1120263*" not in reply
+    assert "🆕 BARU" in reply
+    assert "\n\n• *tkt1120261*" in reply
+
+    all_msg = parse_waha_payload(_payload("#list SEMUA"))
+    with session_scope() as s:
+        all_reply = handle_inbound(s, all_msg)
+    assert "*tkt1120261*" in all_reply
+    assert "*tkt1120262*" in all_reply
+    assert "*tkt1120263*" in all_reply
+
+    done_msg = parse_waha_payload(_payload("#list SELESAI"))
+    with session_scope() as s:
+        done_reply = handle_inbound(s, done_msg)
+    assert "*tkt1120262*" in done_reply
+    assert "tkt1120261" not in done_reply
+    assert "tkt1120263" not in done_reply
+
+
+def test_list_includes_all_open_tickets_and_excludes_old_done_tickets():
+    from datetime import timedelta
+
+    from app.models import Ticket, utcnow
+
+    now = utcnow()
+    with session_scope() as s:
+        for index in range(51):
+            s.add(
+                Ticket(
+                    ticket_id=f"tkt112027{index + 1}",
+                    title=f"Ticket terbuka {index + 1}",
+                    status="BARU",
+                    created_at=now - timedelta(minutes=index),
+                )
+            )
+        s.add(
+            Ticket(
+                ticket_id="tkt11202799",
+                title="Ticket selesai lama",
+                status="SELESAI",
+                created_at=now - timedelta(days=1),
+            )
+        )
+
+    msg = parse_waha_payload(_payload("#list"))
+    with session_scope() as s:
+        reply = handle_inbound(s, msg)
+
+    assert "*tkt11202799*" not in reply
+    assert reply.count("\n\n• *") == 51
+
+
+def test_info_and_list_put_space_between_each_ticket():
+    from types import SimpleNamespace
+
+    from app.replies import summary_block, ticket_list
+
+    first = SimpleNamespace(
+        ticket_id="tkt1120261", detail="Issue satu", title="", status="BARU", pic=""
+    )
+    second = SimpleNamespace(
+        ticket_id="tkt1120262", detail="Issue dua", title="", status="BARU", pic=""
+    )
+    done = SimpleNamespace(
+        ticket_id="tkt1120263", detail="Issue selesai", title="", status="SELESAI", pic=""
+    )
+
+    listed = ticket_list([first, second])
+    summary = summary_block([first, second], [done], "Ringkasan")
+
+    assert "\n\n• *tkt1120261*" in listed
+    assert "tkt1120261* — Issue satu | 🆕 BARU\n\n• *tkt1120262*" in listed
+    assert "tkt1120261* — Issue satu | 🆕 BARU\n\n• *tkt1120262*" in summary
+    assert "tkt1120263* — Issue selesai | ✅ SELESAI" in summary
+
+
 def test_status_transition_and_close():
     msg = parse_waha_payload(_payload("#ticket Ganti filter lobby"))
     with session_scope() as s:
@@ -143,6 +330,27 @@ def test_status_transition_and_close():
         assert t.closed_at is not None
 
 
+def test_status_command_saves_work_note_for_nonfinal_status():
+    msg = parse_waha_payload(_payload("#ticket Perbaikan lampu lobby"))
+    with session_scope() as s:
+        ticket_id = handle_inbound(s, msg)
+
+    update = parse_waha_payload(
+        _payload(f"#status {ticket_id} DIKERJAKAN Pemeriksaan kabel sedang berlangsung")
+    )
+    with session_scope() as s:
+        reply = handle_inbound(s, update)
+    assert "Pemeriksaan kabel sedang berlangsung" in reply
+
+    with session_scope() as s:
+        from app.store import get_ticket
+
+        ticket = get_ticket(s, ticket_id)
+        assert ticket.status == "DIKERJAKAN"
+        assert ticket.resolution == "Pemeriksaan kabel sedang berlangsung"
+        assert ticket.closed_at is None
+
+
 def test_done_status_is_counted_as_closed_in_summary():
     msg = parse_waha_payload(_payload("#ticket AC kamar 203"))
     with session_scope() as s:
@@ -156,8 +364,8 @@ def test_done_status_is_counted_as_closed_in_summary():
     msg3 = parse_waha_payload(_payload("#resume"))
     with session_scope() as s:
         summary = handle_inbound(s, msg3)
-    assert "Belum selesai (0)" in summary
-    assert "Sudah selesai / ditutup (1)" in summary
+    assert "Belum selesai: 0" in summary
+    assert "Sudah selesai / ditutup hari ini: 1" in summary
 
 
 def test_legacy_done_status_is_closed_in_info_and_sheet_summary():
@@ -170,8 +378,8 @@ def test_legacy_done_status_is_closed_in_info_and_sheet_summary():
     msg = parse_waha_payload(_payload("#info"))
     with session_scope() as s:
         summary = handle_inbound(s, msg)
-    assert "Belum selesai (0)" in summary
-    assert "Sudah selesai / ditutup (1)" in summary
+    assert "Belum selesai: 0" in summary
+    assert "Sudah selesai / ditutup hari ini: 1" in summary
 
     rows = build_summary_rows(datetime.now())
     assert rows[0][5] == 1
@@ -214,6 +422,26 @@ def test_reply_to_ticket_id_updates_status():
         assert ticket.status == "SELESAI"
         assert ticket.resolution == "AC sudah diperbaiki"
         assert ticket.closed_at is not None
+
+
+def test_reply_with_done_command_to_ticket_id_updates_status():
+    msg = parse_waha_payload(_payload("#ticket AC kamar 203"))
+    with session_scope() as s:
+        ticket_id = handle_inbound(s, msg)
+
+    reply_payload = _payload("#done AC sudah diperbaiki", message_id="reply-done")
+    reply_payload["quotedMsg"] = {"body": ticket_id}
+    with session_scope() as s:
+        reply = handle_inbound(s, parse_waha_payload(reply_payload))
+
+    assert "BARU -> SELESAI" in reply
+    assert "AC sudah diperbaiki" in reply
+    with session_scope() as s:
+        from app.store import get_ticket
+
+        ticket = get_ticket(s, ticket_id)
+        assert ticket.status == "SELESAI"
+        assert ticket.resolution == "AC sudah diperbaiki"
 
 
 def test_reply_without_ticket_quote_is_ignored():
@@ -336,6 +564,11 @@ def test_resume_alias_is_migrated_into_existing_command_settings():
             ]
         if command["name"] == "ticket":
             command["usage"] = "#ticket <judul> | #ticket <judul> | <detail> | @PIC"
+        if command["name"] == "status":
+            command["usage"] = "#status <ID> [STATUS]"
+        if command["name"] == "list":
+            command["usage"] = "#list [STATUS] [jumlah]"
+            command["description"] = "Daftar ticket semua status"
     with session_scope() as s:
         s.add(Setting(key="commands", value=json.dumps(commands)))
 
@@ -347,6 +580,15 @@ def test_resume_alias_is_migrated_into_existing_command_settings():
         command for command in settings_store.commands if command["name"] == "ticket"
     )
     assert ticket_command["usage"] == "#ticket <issue> [@PIC]"
+    status_command = next(
+        command for command in settings_store.commands if command["name"] == "status"
+    )
+    assert status_command["usage"] == "#status <ID> [STATUS] [catatan]"
+    list_command = next(
+        command for command in settings_store.commands if command["name"] == "list"
+    )
+    assert list_command["usage"] == "#list [STATUS|SEMUA] [jumlah]"
+    assert list_command["description"] == "Daftar ticket belum selesai"
 
 
 def test_legacy_title_is_moved_into_empty_issue():
@@ -371,3 +613,120 @@ def test_legacy_title_is_moved_into_empty_issue():
     by_id = {ticket.ticket_id: ticket for ticket in tickets}
     assert by_id["tkt1120261"].detail == "Issue lama"
     assert by_id["tkt1120262"].detail == "Issue yang sudah ada"
+
+
+# ---------------------------------------------------------------------------
+# #info: semua ticket yang belum selesai + ticket yang selesai hari ini
+# ---------------------------------------------------------------------------
+def test_info_shows_all_open_tickets_and_only_tickets_closed_today():
+    from datetime import timedelta
+
+    from app.models import Ticket, utcnow
+
+    now = utcnow()
+    yesterday = now - timedelta(days=1)
+    with session_scope() as s:
+        s.add(
+            Ticket(
+                ticket_id="tkt1120261",
+                title="Masih jalan sejak kemarin",
+                status="BARU",
+                created_at=yesterday,
+                updated_at=yesterday,
+            )
+        )
+        s.add(
+            Ticket(
+                ticket_id="tkt1120262",
+                title="Selesai hari ini",
+                status="SELESAI",
+                created_at=yesterday,
+                updated_at=now,
+                closed_at=now,
+            )
+        )
+        s.add(
+            Ticket(
+                ticket_id="tkt1120263",
+                title="Selesai kemarin",
+                status="SELESAI",
+                created_at=yesterday,
+                updated_at=yesterday,
+                closed_at=yesterday,
+            )
+        )
+        s.commit()
+
+    msg = parse_waha_payload(_payload("#info"))
+    with session_scope() as s:
+        summary = handle_inbound(s, msg)
+
+    assert "tkt1120261" in summary  # belum selesai, berapa pun umurnya
+    assert "tkt1120262" in summary  # selesai hari ini
+    assert "tkt1120263" not in summary  # selesai kemarin -> tidak ikut
+    assert "Belum selesai: 1" in summary
+    assert "Sudah selesai / ditutup hari ini: 1" in summary
+
+
+def test_info_semua_includes_tickets_closed_on_previous_days():
+    from datetime import timedelta
+
+    from app.models import Ticket, utcnow
+
+    now = utcnow()
+    yesterday = now - timedelta(days=1)
+    with session_scope() as s:
+        s.add(
+            Ticket(
+                ticket_id="tkt1120264",
+                title="Selesai kemarin",
+                status="SELESAI",
+                created_at=yesterday,
+                updated_at=yesterday,
+                closed_at=yesterday,
+            )
+        )
+        s.commit()
+
+    msg = parse_waha_payload(_payload("#info semua"))
+    with session_scope() as s:
+        summary = handle_inbound(s, msg)
+
+    assert "tkt1120264" in summary
+    assert "Sudah selesai / ditutup: 1" in summary
+
+
+def test_daily_summary_uses_same_logic_as_info():
+    from datetime import timedelta
+
+    from app.handlers import daily_summary_text
+    from app.models import Ticket, utcnow
+
+    now = utcnow()
+    yesterday = now - timedelta(days=1)
+    with session_scope() as s:
+        s.add(
+            Ticket(
+                ticket_id="tkt1120265",
+                title="Masih jalan",
+                status="BARU",
+                created_at=yesterday,
+                updated_at=yesterday,
+            )
+        )
+        s.add(
+            Ticket(
+                ticket_id="tkt1120266",
+                title="Selesai kemarin",
+                status="SELESAI",
+                created_at=yesterday,
+                updated_at=yesterday,
+                closed_at=yesterday,
+            )
+        )
+        s.commit()
+
+    text = daily_summary_text()
+    assert "tkt1120265" in text
+    assert "tkt1120266" not in text
+    assert "Sudah selesai / ditutup hari ini: 0" in text

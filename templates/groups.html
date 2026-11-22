@@ -2,51 +2,77 @@
 {% block title %}Grup — Bot Engineering{% endblock %}
 {% block nav_groups %}active{% endblock %}
 
-{% block header %}
-<div class="page-head"><h1>Grup WhatsApp</h1></div>
-{% endblock %}
+{% block heading %}Grup WhatsApp{% endblock %}
+{% block subheading %}{{ groups|length }} grup terdaftar{% endblock %}
 
 {% block content %}
 {% if deleted %}
-  <div class="alert success">Grup dihapus dari konfigurasi bot. Riwayat ticket dan log tetap disimpan.</div>
+  <div class="alert alert-success"><span class="mi">check_circle</span><span>Grup dihapus dari konfigurasi bot. Riwayat ticket dan log tetap disimpan.</span></div>
 {% endif %}
-<section class="card">
-  <p class="muted">Grup terdaftar otomatis saat bot menerima pesan. Nonaktifkan grup
-  agar bot mengabaikan pesan dari grup tersebut. Penghapusan hanya menghapus konfigurasi
-  grup; ticket dan log tetap disimpan, dan grup dapat terdaftar kembali saat menerima perintah.</p>
-  {% if groups %}
-  <div class="stack">
+
+<div class="alert alert-info">
+  <span class="mi">info</span>
+  <span>Grup terdaftar otomatis saat bot menerima pesan. Nonaktifkan grup agar bot mengabaikan pesan dari grup tersebut.
+  Penghapusan hanya menghapus konfigurasi grup; ticket dan log tetap disimpan, dan grup dapat terdaftar kembali saat menerima perintah.</span>
+</div>
+
+{% if groups %}
+  <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
     {% for g in groups %}
-    <form class="group-card" method="post" action="/groups/{{ g.chat_id }}/update">
-      <div class="group-head">
+    <form class="card" method="post" action="/groups/{{ g.chat_id }}/update">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex min-w-0 items-start gap-3">
+          <div class="integrasi-ico shrink-0"><span class="mi">forum</span></div>
+          <div class="min-w-0">
+            <div class="truncate font-bold text-slate-900">{{ g.chat_name or '(tanpa nama)' }}</div>
+            <div class="truncate font-mono text-[11px] text-slate-500">{{ g.chat_id }}</div>
+          </div>
+        </div>
+        <span class="badge {{ 'pill-ok' if g.enabled else 'pill-bad' }}">
+          <span class="mi">{{ 'toggle_on' if g.enabled else 'toggle_off' }}</span>
+          {{ 'aktif' if g.enabled else 'nonaktif' }}
+        </span>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 gap-3 rounded-xl bg-slate-50 p-3.5 sm:grid-cols-3">
+        <label class="check">
+          <input type="checkbox" name="enabled" {% if g.enabled %}checked{% endif %}> Aktif
+        </label>
+        <label class="check">
+          <input type="checkbox" name="daily_summary" {% if g.daily_summary %}checked{% endif %}> Ringkasan harian
+        </label>
+        <label class="check">
+          <input type="checkbox" name="log_messages" {% if g.log_messages %}checked{% endif %}> Simpan log pesan
+        </label>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <strong>{{ g.chat_name or '(tanpa nama)' }}</strong>
-          <div class="muted small mono">{{ g.chat_id }}</div>
+          <label class="label">Prefix perintah (kosong = global)</label>
+          <input type="text" name="prefixes" value="{{ g.prefixes }}" class="input" placeholder="#,/">
         </div>
-        <div class="row">
-          <label class="check"><input type="checkbox" name="enabled" {% if g.enabled %}checked{% endif %}> Aktif</label>
-          <label class="check"><input type="checkbox" name="daily_summary" {% if g.daily_summary %}checked{% endif %}> Ringkasan harian</label>
-          <label class="check"><input type="checkbox" name="log_messages" {% if g.log_messages %}checked{% endif %}> Simpan log pesan</label>
-          <button class="btn primary" type="submit">Simpan</button>
+        <div>
+          <label class="label">Catatan</label>
+          <input type="text" name="note" value="{{ g.note }}" class="input">
         </div>
       </div>
-      <div class="grid-3">
-        <label>Prefix perintah (kosong = global)
-          <input type="text" name="prefixes" value="{{ g.prefixes }}" placeholder="#,/">
-        </label>
-        <label>Catatan
-          <input type="text" name="note" value="{{ g.note }}">
-        </label>
+
+      <div class="mt-4 flex items-center justify-between gap-2">
+        <button class="btn btn-primary" type="submit"><span class="mi">save</span> Simpan</button>
+        <button class="btn btn-danger btn-sm" type="submit"
+                formaction="/groups/{{ g.chat_id }}/delete"
+                formmethod="post"
+                onclick="return confirm('Hapus grup ini dari konfigurasi bot? Riwayat ticket dan log tetap disimpan.');">
+          <span class="mi">delete</span> Hapus grup
+        </button>
       </div>
-    </form>
-    <form method="post" action="/groups/{{ g.chat_id }}/delete"
-          onsubmit="return confirm('Hapus grup {{ g.chat_name or g.chat_id }} dari konfigurasi bot? Riwayat ticket dan log tetap disimpan.');">
-      <button class="btn danger" type="submit">Hapus grup</button>
     </form>
     {% endfor %}
   </div>
-  {% else %}
-    <p class="muted">Belum ada grup.</p>
-  {% endif %}
-</section>
+{% else %}
+  <section class="card text-center">
+    <span class="mi text-3xl text-slate-400">group_add</span>
+    <p class="mt-2 text-sm text-slate-500">Belum ada grup. Bot akan mendaftarkan grup secara otomatis saat menerima pesan.</p>
+  </section>
+{% endif %}
 {% endblock %}

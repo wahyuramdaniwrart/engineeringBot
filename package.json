@@ -1,0 +1,13 @@
+{
+  "name": "bot-whatsapp-engineering-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tailwind build untuk dashboard Bot WhatsApp Engineering",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i ./static/src/tailwind.css -o ./static/tailwind.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i ./static/src/tailwind.css -o ./static/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

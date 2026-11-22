@@ -169,6 +169,60 @@ class WahaClient:
                 "POST", f"/api/{self.session}/sendText", body
             )
 
+    def send_image(
+        self,
+        chat_id: str,
+        url: str,
+        caption: str = "",
+        mimetype: str = "",
+        filename: str = "",
+    ) -> Any:
+        file: dict[str, str] = {"url": url}
+        if mimetype:
+            file["mimetype"] = mimetype
+        if filename:
+            file["filename"] = filename
+        body: dict[str, Any] = {
+            "session": self.session,
+            "chatId": chat_id,
+            "file": file,
+        }
+        if caption:
+            body["caption"] = caption
+        try:
+            return self.request("POST", "/api/sendImage", body)
+        except WahaError as exc:
+            if "Session name is required" not in str(exc) and "404" not in str(exc):
+                raise
+            return self.request("POST", f"/api/{self.session}/sendImage", body)
+
+    def send_file(
+        self,
+        chat_id: str,
+        url: str,
+        caption: str = "",
+        mimetype: str = "",
+        filename: str = "",
+    ) -> Any:
+        file: dict[str, str] = {"url": url}
+        if mimetype:
+            file["mimetype"] = mimetype
+        if filename:
+            file["filename"] = filename
+        body: dict[str, Any] = {
+            "session": self.session,
+            "chatId": chat_id,
+            "file": file,
+        }
+        if caption:
+            body["caption"] = caption
+        try:
+            return self.request("POST", "/api/sendFile", body)
+        except WahaError as exc:
+            if "Session name is required" not in str(exc) and "404" not in str(exc):
+                raise
+            return self.request("POST", f"/api/{self.session}/sendFile", body)
+
     def send_seen(self, chat_id: str) -> Any:
         body = {"session": self.session, "chatId": chat_id}
         try:

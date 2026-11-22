@@ -25,3 +25,11 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# node / tailwind
+node_modules/
+tmp_shots/
+tmp_check_pages.py
+tmp_shot.js
+tmp_audit.js
+tmp_colors.js

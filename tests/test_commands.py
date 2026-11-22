@@ -42,6 +42,14 @@ def test_parse_alias():
     assert cmd.action == "create"
 
 
+def test_parse_detail_command():
+    cmd = parse_command("#detail tkt1120261", DEFAULT_PREFIXES, DEFAULT_COMMANDS)
+    assert cmd is not None
+    assert cmd.name == "detail"
+    assert cmd.action == "detail"
+    assert cmd.args == "tkt1120261"
+
+
 def test_parse_not_a_command():
     assert parse_command("halo semua", DEFAULT_PREFIXES, DEFAULT_COMMANDS) is None
     assert parse_command("", DEFAULT_PREFIXES, DEFAULT_COMMANDS) is None
@@ -104,5 +112,7 @@ def test_extract_mentions():
 
 def test_format_help_contains_usage():
     txt = format_help(DEFAULT_COMMANDS, DEFAULT_PREFIXES)
+    assert txt.startswith("📚 *MENU PERINTAH BOT*")
     assert "#ticket" in txt
     assert "#info" in txt
+    assert "Alias: #buat, #tiket, #task" in txt

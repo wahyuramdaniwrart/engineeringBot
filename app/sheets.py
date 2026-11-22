@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from .media import build_url, image_formula
 from .store import format_local_datetime
 
 log = logging.getLogger("sheets")
@@ -29,6 +30,8 @@ TICKET_HEADERS = [
     "Grup",
     "Selesai",
     "Keterangan",
+    "Foto",
+    "Link Foto",
 ]
 
 _HEADER_ALIASES = {
@@ -56,8 +59,9 @@ def col_letter(count: int) -> str:
 def _ticket_row(ticket: Any) -> list[str]:
     """Baris ticket sesuai TICKET_HEADERS.
 
-    Judul, metadata tambahan, dan foto sengaja tidak disinkronkan.
+    Judul dan metadata tambahan sengaja tidak disinkronkan.
     """
+    media_path = getattr(ticket, "media_path", "") or ""
     return [
         ticket.ticket_id,
         _fmt_dt(ticket.created_at),
@@ -69,6 +73,8 @@ def _ticket_row(ticket: Any) -> list[str]:
         ticket.group_name or ticket.group_id or "",
         _fmt_dt(ticket.closed_at) if ticket.closed_at else "",
         ticket.resolution or "",
+        image_formula(ticket),
+        build_url(media_path) if media_path else "",
     ]
 
 
@@ -279,6 +285,9 @@ class SheetsClient:
         row_values = [""] * max(columns.values())
         for header, value in zip(TICKET_HEADERS, values):
             row_values[columns[header] - 1] = value
+        image_column = columns["Foto"]
+        image_value = row_values[image_column - 1]
+        row_values[image_column - 1] = ""
         try:
             res = ws.append_row(
                 row_values,
@@ -288,7 +297,10 @@ class SheetsClient:
             self.last_error = str(exc)
             log.warning("Gagal append ticket ke Sheets: %s", exc)
             return None
-        return _row_from_result(res)
+        row = _row_from_result(res)
+        if row and image_value:
+            self._write_image_formula(ws, image_column, row, image_value)
+        return row
 
     def update_ticket(self, ticket: Any, tab: str) -> bool:
         ws = self._worksheet(tab, TICKET_HEADERS)
@@ -300,9 +312,12 @@ class SheetsClient:
             return bool(row)
         values = _ticket_row(ticket)
         columns = self._column_indexes[tab]
+        image_column = columns["Foto"]
+        image_value = values[TICKET_HEADERS.index("Foto")]
         cells = sorted(
             (columns[header], value)
             for header, value in zip(TICKET_HEADERS, values)
+            if header != "Foto"
         )
         ranges: list[list[Any]] = []
         for column, value in cells:
@@ -321,7 +336,25 @@ class SheetsClient:
             self.last_error = str(exc)
             log.warning("Gagal update ticket ke Sheets: %s", exc)
             return False
+        if not self._write_image_formula(ws, image_column, row, image_value):
+            return False
         ticket.sheet_row = row
+        return True
+
+    def _write_image_formula(
+        self, ws: Any, column: int, row: int, formula: str
+    ) -> bool:
+        """Tulis formula IMAGE sebagai formula, bukan sebagai teks biasa."""
+        try:
+            ws.update(
+                range_name=f"{col_letter(column)}{row}",
+                values=[[formula]],
+                raw=False,
+            )
+        except Exception as exc:
+            self.last_error = str(exc)
+            log.warning("Gagal menulis foto ticket ke Sheets: %s", exc)
+            return False
         return True
 
     def find_row(self, ws: Any, ticket_id: str, tab: str) -> int | None:

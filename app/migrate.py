@@ -26,13 +26,16 @@ log = logging.getLogger("migrate")
 # ---------------------------------------------------------------------------
 # Kolom baru pada tabel tickets
 # ---------------------------------------------------------------------------
-TICKET_MEDIA_COLUMNS: list[tuple[str, str]] = [
+TICKET_COLUMNS: list[tuple[str, str]] = [
     ("media_filename", "VARCHAR(255) DEFAULT ''"),
     ("media_path", "VARCHAR(512) DEFAULT ''"),
     ("media_mimetype", "VARCHAR(128) DEFAULT ''"),
     ("media_size", "INTEGER DEFAULT 0"),
     ("media_url", "VARCHAR(512) DEFAULT ''"),
     ("media_caption", "TEXT DEFAULT ''"),
+    ("reminder_at", "DATETIME NULL"),
+    ("reminder_retry_at", "DATETIME NULL"),
+    ("reminder_last_sent_at", "DATETIME NULL"),
 ]
 
 
@@ -44,13 +47,13 @@ def add_missing_ticket_columns(engine: Engine) -> list[str]:
     existing = {c["name"] for c in inspector.get_columns("tickets")}
     added: list[str] = []
     with engine.begin() as conn:
-        for name, ddl in TICKET_MEDIA_COLUMNS:
+        for name, ddl in TICKET_COLUMNS:
             if name in existing:
                 continue
             conn.execute(text(f"ALTER TABLE tickets ADD COLUMN {name} {ddl}"))
             added.append(name)
     if added:
-        log.info("Migrasi: kolom media ditambahkan -> %s", ", ".join(added))
+        log.info("Migrasi: kolom ticket ditambahkan -> %s", ", ".join(added))
     return added
 
 
@@ -174,14 +177,45 @@ def ensure_commands(engine: Engine) -> list[str]:
         }
         updated_usages: list[str] = []
         for default in DEFAULT_COMMANDS:
-            if not isinstance(default, dict) or default.get("name") != "ticket":
+            if not isinstance(default, dict):
                 continue
-            stored = existing_commands.get("ticket")
-            if stored and stored.get("usage") == (
-                "#ticket <judul> | #ticket <judul> | <detail> | @PIC"
+            name = str(default.get("name", "")).strip().lower()
+            stored = existing_commands.get(name)
+            legacy_usage = {
+                "ticket": "#ticket <judul> | #ticket <judul> | <detail> | @PIC",
+                "status": "#status <ID> [STATUS]",
+                "list": "#list [STATUS] [jumlah]",
+            }.get(name)
+            changed = False
+            legacy_list_usages = {
+                "#list [STATUS] [jumlah]",
+                "#list [STATUS AKTIF] [jumlah]",
+            }
+            if stored and (
+                (legacy_usage and stored.get("usage") == legacy_usage)
+                or (
+                    name == "list"
+                    and stored.get("usage") in legacy_list_usages
+                )
             ):
                 stored["usage"] = default.get("usage", stored["usage"])
-                updated_usages.append("ticket")
+                changed = True
+            if (
+                name == "list"
+                and stored
+                and stored.get("description")
+                in (
+                    "Daftar ticket terbaru",
+                    "Daftar ticket yang belum selesai",
+                    "Daftar ticket semua status",
+                )
+            ):
+                stored["description"] = default.get(
+                    "description", stored["description"]
+                )
+                changed = True
+            if changed:
+                updated_usages.append(name)
         added = [
             c
             for c in DEFAULT_COMMANDS

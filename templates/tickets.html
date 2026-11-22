@@ -2,85 +2,221 @@
 {% block title %}Tickets — Bot Engineering{% endblock %}
 {% block nav_tickets %}active{% endblock %}
 
-{% block header %}
-<div class="page-head"><h1>Ticket</h1></div>
+{% block heading %}Tickets{% endblock %}
+{% block subheading %}{{ tickets|length }} ticket ditampilkan{% endblock %}
+
+{% block topbar %}
+<a href="/" class="btn btn-ghost btn-sm"><span class="mi">arrow_back</span> Dashboard</a>
 {% endblock %}
 
 {% block content %}
 {% if deleted is not none %}
-  <div class="alert success">
-    Dihapus {{ deleted }} ticket dan {{ logs_deleted }} log terkait.
-    Google Sheets tidak diubah.
-    {% if media_errors %} {{ media_errors }} berkas media gagal dibersihkan; periksa log aplikasi.{% endif %}
+  <div class="alert alert-success">
+    <span class="mi">check_circle</span>
+    <span>Dihapus {{ deleted }} ticket dan {{ logs_deleted }} log terkait. Google Sheets tidak diubah.
+    {% if media_errors %} {{ media_errors }} berkas media gagal dibersihkan; periksa log aplikasi.{% endif %}</span>
   </div>
 {% endif %}
 {% if delete_error == 'confirmation' %}
-  <div class="alert error">Penghapusan dibatalkan. Frasa konfirmasi tidak cocok.</div>
+  <div class="alert alert-error"><span class="mi">warning</span><span>Penghapusan dibatalkan. Frasa konfirmasi tidak cocok.</span></div>
 {% endif %}
+{% if ticket_deleted %}
+  <div class="alert alert-success">
+    <span class="mi">check_circle</span>
+    <span>Ticket {{ ticket_deleted }} dihapus bersama {{ logs_deleted }} log terkait. Google Sheets tidak diubah.
+    {% if media_errors %} {{ media_errors }} berkas media gagal dibersihkan; periksa log aplikasi.{% endif %}</span>
+  </div>
+{% endif %}
+{% if ticket_delete_error == 'confirmation' %}
+  <div class="alert alert-error"><span class="mi">warning</span><span>Penghapusan ticket dibatalkan karena konfirmasi tidak cocok.</span></div>
+{% elif ticket_delete_error == 'not_found' %}
+  <div class="alert alert-error"><span class="mi">warning</span><span>Ticket yang akan dihapus tidak ditemukan.</span></div>
+{% endif %}
+{% if reminder_updated %}
+  <div class="alert alert-success">
+    <span class="mi">check_circle</span>
+    <span>Reminder {{ reminder_updated }} disimpan dan akan berulang setiap hari.</span>
+  </div>
+{% elif reminder_cancelled %}
+  <div class="alert alert-success">
+    <span class="mi">check_circle</span>
+    <span>Reminder {{ reminder_cancelled }} dibatalkan.</span>
+  </div>
+{% elif reminder_error %}
+  <div class="alert alert-error">
+    <span class="mi">warning</span>
+    <span>
+      {% if reminder_error == 'not_found' %}Ticket {{ reminder_ticket_id }} tidak ditemukan.
+      {% elif reminder_error == 'not_set' %}Ticket {{ reminder_ticket_id }} tidak memiliki reminder aktif.
+      {% elif reminder_error == 'closed' %}Reminder hanya dapat diatur untuk ticket yang belum selesai.
+      {% elif reminder_error == 'no_chat' %}Ticket {{ reminder_ticket_id }} tidak memiliki tujuan grup WhatsApp.
+      {% else %}Waktu reminder tidak valid atau sudah lewat. Pilih tanggal dan jam di masa depan.{% endif %}
+    </span>
+  </div>
+{% endif %}
+
+<div class="alert alert-info">
+  <span class="mi">schedule</span>
+  <span>Reminder ticket berulang setiap hari pada waktu yang dipilih, mengikuti zona waktu {{ reminder_timezone }}. Hanya ticket belum selesai yang dapat dijadwalkan.</span>
+</div>
+
 <section class="card">
-  <form class="filter-bar" method="get" action="/tickets">
-    <input type="text" name="q" value="{{ f_q }}" placeholder="Cari judul / ID / PIC">
-    <select name="status">
+  <!-- Filter bar -->
+  <form class="mb-4 flex flex-wrap items-center gap-2" method="get" action="/tickets">
+    <div class="relative min-w-[220px] flex-1">
+      <span class="mi pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
+      <input type="text" name="q" value="{{ f_q }}" placeholder="Cari judul / ID / PIC"
+             class="input mt-0 pl-10" data-table-search="ticket-table">
+    </div>
+    <select name="status" class="input mt-0 w-auto min-w-[150px]">
       <option value="">Semua status</option>
       {% for st in statuses %}
         <option value="{{ st.key }}" {% if f_status == st.key %}selected{% endif %}>{{ st.label }}</option>
       {% endfor %}
     </select>
-    <select name="group_id">
+    <select name="group_id" class="input mt-0 w-auto min-w-[150px]">
       <option value="">Semua grup</option>
       {% for g in groups %}
         <option value="{{ g.chat_id }}" {% if f_group == g.chat_id %}selected{% endif %}>{{ g.chat_name or g.chat_id }}</option>
       {% endfor %}
     </select>
-    <button class="btn primary" type="submit">Terapkan</button>
-    <a class="btn ghost" href="/tickets">Reset</a>
+    <button class="btn btn-primary" type="submit"><span class="mi">filter_alt</span> Terapkan</button>
+    <a class="btn btn-ghost" href="/tickets"><span class="mi">restart_alt</span> Reset</a>
   </form>
 
-  <table class="table">
-    <thead><tr><th>Foto</th><th>ID</th><th>Issue</th><th>Status</th><th>Prio</th><th>PIC</th><th>Pelapor</th><th>Grup</th><th>Dibuat</th></tr></thead>
-    <tbody>
-    {% for t in tickets %}
-      <tr>
-        <td>
-          {% if t.media_attachments %}
-            <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            {% for photo in t.media_attachments %}
-              <a href="{{ media_url(photo.media_path) }}" target="_blank" title="Buka foto {{ t.ticket_id }} ({{ loop.index }})">
-                <img src="{{ media_url(photo.media_path) }}" alt="Foto {{ t.ticket_id }} {{ loop.index }}"
-                     style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;">
-              </a>
-            {% endfor %}
-            </div>
-          {% else %}
-            <span class="muted">-</span>
-          {% endif %}
-        </td>
-        <td><a class="link mono" href="/tickets/{{ t.ticket_id }}">{{ t.ticket_id }}</a></td>
-        <td>{{ t.detail or t.title or '-' }}</td>
-        <td><span class="badge">{{ t.status }}</span></td>
-        <td>{{ t.priority }}</td>
-        <td>{{ t.pic or '-' }}</td>
-        <td>{{ t.reporter or '-' }}</td>
-        <td class="muted small">{{ t.group_name or t.group_id or '-' }}</td>
-        <td class="muted small">{{ t.created_at|local_datetime('%d-%m-%Y %H:%M') }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="9" class="muted">Tidak ada ticket yang cocok.</td></tr>
+  <!-- Filter cepat per status -->
+  <div class="mb-4 flex flex-wrap items-center gap-1.5">
+    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Cepat:</span>
+    <a href="/tickets" class="badge {{ 'bg-brand-600 !text-white' if not f_status else '' }}">Semua</a>
+    {% for st in statuses %}
+      <a href="/tickets?status={{ st.key }}"
+         class="badge {{ 'bg-brand-600 !text-white' if f_status == st.key else '' }} hover:!bg-brand-500">{{ st.label }}</a>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
+
+  <div class="tbl-scroll">
+    <table class="tbl" id="ticket-table">
+      <thead>
+        <tr>
+          <th class="w-16">Foto</th><th>ID</th><th>Issue</th><th>Status</th><th>Prio</th>
+          <th>PIC</th><th>Pelapor</th><th>Grup</th><th>Dibuat</th><th>Jadwal / Reminder</th><th class="text-right">Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in tickets %}
+        <tr data-row-text="{{ (t.ticket_id ~ ' ' ~ (t.detail or t.title or '') ~ ' ' ~ (t.pic or '') ~ ' ' ~ (t.reporter or '') ~ ' ' ~ (t.status or '') ~ ' ' ~ (t.group_name or t.group_id or ''))|lower }}">
+          <td>
+            {% if t.media_attachments %}
+              <div class="flex flex-wrap gap-1">
+              {% for photo in t.media_attachments %}
+                <a href="{{ media_url(photo.media_path) }}" target="_blank"
+                   data-gallery='{{ gallery_items(t.media_attachments) }}'
+                   data-gallery-index="{{ loop.index0 }}"
+                   data-gallery-title="{{ t.ticket_id }}"
+                   data-gallery-detail="/tickets/{{ t.ticket_id }}"
+                   title="Buka galeri foto {{ t.ticket_id }}">
+                  <img src="{{ media_url(photo.media_path) }}" alt="Foto {{ t.ticket_id }} {{ loop.index }}"
+                       class="h-11 w-11 cursor-zoom-in rounded-lg border border-slate-200 object-cover transition hover:scale-105">
+                </a>
+              {% endfor %}
+              </div>
+            {% else %}
+              <span class="text-slate-400">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if t.media_attachments %}
+              <a href="/tickets/{{ t.ticket_id }}"
+                 data-gallery='{{ gallery_items(t.media_attachments) }}'
+                 data-gallery-title="{{ t.ticket_id }}"
+                 data-gallery-detail="/tickets/{{ t.ticket_id }}"
+                 class="font-mono text-xs font-bold text-brand-700 hover:underline"
+                 title="Buka galeri foto {{ t.ticket_id }}">
+                {{ t.ticket_id }} <span class="mi align-middle text-[13px]">photo_library</span>
+              </a>
+            {% else %}
+              <a href="/tickets/{{ t.ticket_id }}" class="font-mono text-xs font-bold text-brand-700 hover:underline">{{ t.ticket_id }}</a>
+            {% endif %}
+          </td>
+          <td class="max-w-[260px]"><span class="line-clamp-2">{{ t.detail or t.title or '-' }}</span></td>
+          <td><span class="badge">{{ t.status }}</span></td>
+          <td>{{ t.priority }}</td>
+          <td>{{ t.pic or '-' }}</td>
+          <td class="text-slate-600">{{ t.reporter or '-' }}</td>
+          <td class="text-[11px] text-slate-500">{{ t.group_name or t.group_id or '-' }}</td>
+          <td class="whitespace-nowrap text-[11px] text-slate-500">{{ t.created_at|local_datetime('%d-%m-%Y %H:%M') }}</td>
+          <td class="min-w-[220px]">
+            {% if t.status in open_statuses and t.group_id %}
+              <form method="post" action="/tickets/{{ t.ticket_id }}/reminder" class="space-y-1.5">
+                <input type="hidden" name="return_status" value="{{ f_status }}">
+                <input type="hidden" name="return_q" value="{{ f_q }}">
+                <input type="hidden" name="return_group_id" value="{{ f_group }}">
+                <input type="datetime-local" name="scheduled_at" required
+                       value="{{ t.reminder_at|local_datetime('%Y-%m-%dT%H:%M') if t.reminder_at else '' }}"
+                       class="input mt-0 text-xs">
+                <div class="flex flex-wrap gap-1">
+                  <button class="btn btn-primary btn-sm" type="submit">
+                    <span class="mi">schedule</span> {{ 'Ubah' if t.reminder_at else 'Atur' }}
+                  </button>
+                  {% if t.reminder_at %}
+                    <button class="btn btn-ghost btn-sm" type="submit" name="cancel" value="1" formnovalidate>
+                      <span class="mi">event_busy</span> Batal
+                    </button>
+                  {% endif %}
+                </div>
+                {% if t.reminder_at %}
+                  <span class="block text-[10px] text-slate-500">
+                    Berikutnya: {{ t.reminder_at|local_datetime('%d-%m-%Y %H:%M') }}
+                  </span>
+                {% else %}
+                  <span class="block text-[10px] text-slate-400">Belum dijadwalkan</span>
+                {% endif %}
+              </form>
+            {% elif t.status in open_statuses %}
+              <span class="text-xs text-amber-700">Tidak ada tujuan WhatsApp</span>
+            {% else %}
+              <span class="text-xs text-slate-400">Ticket selesai</span>
+            {% endif %}
+          </td>
+          <td class="text-right">
+            <div class="flex items-center justify-end gap-1">
+              <a href="/tickets/{{ t.ticket_id }}" class="btn btn-ghost btn-sm"><span class="mi">open_in_new</span> Detail</a>
+              <form method="post" action="/tickets/{{ t.ticket_id }}/delete"
+                    onsubmit="return confirm('Hapus ticket {{ t.ticket_id }} beserta foto dan log lokalnya? Google Sheets tidak diubah.');">
+                <input type="hidden" name="confirmation" value="{{ t.ticket_id }}">
+                <button class="btn btn-danger btn-sm" type="submit"><span class="mi">delete</span> Hapus</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="11" class="py-8 text-center text-slate-500">Tidak ada ticket yang cocok.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="mt-3 text-[11px] text-slate-400" data-search-status></p>
 </section>
 
-<section class="card" style="margin-top:16px;border-color:#fecaca;">
-  <h2>Hapus seluruh ticket</h2>
-  <p class="muted">
-    Menghapus semua ticket lokal, foto lampiran, dan log yang terkait.
-    Data di Google Sheets tidak diubah. Tindakan ini tidak dapat dibatalkan.
-  </p>
-  <form method="post" action="/tickets/delete-all" class="stack-sm">
-    <label for="delete-confirmation">Ketik <strong>HAPUS SEMUA TICKET</strong> untuk mengonfirmasi</label>
-    <input id="delete-confirmation" name="confirmation" type="text" required autocomplete="off">
-    <button class="btn danger" type="submit">Hapus seluruh ticket lokal</button>
-  </form>
-</section>
+<!-- Zona bahaya -->
+<details class="card border-red-200">
+  <summary class="flex cursor-pointer items-center justify-between gap-2 text-sm font-bold text-red-700">
+    <span class="flex items-center gap-2"><span class="mi">warning</span> Hapus seluruh ticket</span>
+    <span class="mi">expand_more</span>
+  </summary>
+  <div class="mt-4">
+    <p class="text-sm text-slate-500">
+      Menghapus semua ticket lokal, foto lampiran, dan log yang terkait.
+      Data di Google Sheets tidak diubah. Tindakan ini tidak dapat dibatalkan.
+    </p>
+    <form method="post" action="/tickets/delete-all" class="mt-4 flex flex-wrap items-end gap-2">
+      <div class="min-w-[260px] flex-1">
+        <label for="delete-confirmation" class="label">Ketik <strong>HAPUS SEMUA TICKET</strong> untuk mengonfirmasi</label>
+        <input id="delete-confirmation" name="confirmation" type="text" required autocomplete="off" class="input">
+      </div>
+      <button class="btn btn-danger" type="submit"><span class="mi">delete_forever</span> Hapus seluruh ticket lokal</button>
+    </form>
+  </div>
+</details>
 {% endblock %}

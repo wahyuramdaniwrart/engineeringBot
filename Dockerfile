@@ -1,3 +1,20 @@
+# -----------------------------------------------------------------------------
+# Stage 1: build CSS Tailwind untuk dashboard.
+# Kalau npm/build gagal, CSS lama yang sudah ada di static/ tetap dipakai.
+# -----------------------------------------------------------------------------
+FROM node:20-slim AS css
+
+WORKDIR /css
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund || true
+COPY tailwind.config.js ./
+COPY templates ./templates
+COPY static ./static
+RUN npm run build:css || echo "Peringatan: build Tailwind gagal, memakai CSS lama."
+
+# -----------------------------------------------------------------------------
+# Stage 2: aplikasi
+# -----------------------------------------------------------------------------
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -16,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY templates ./templates
 COPY static ./static
+COPY --from=css /css/static/tailwind.css ./static/tailwind.css
 
 RUN mkdir -p /data /secrets
 

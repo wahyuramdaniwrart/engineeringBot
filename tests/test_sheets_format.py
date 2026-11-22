@@ -42,6 +42,7 @@ class FakeWorksheet:
         self.col_count = max(10, max((len(row) for row in self.rows), default=0))
         self.row_count = 100
         self.updates: list[tuple[str, list[list[str]]]] = []
+        self.update_options: list[dict] = []
         self.appended: list[list[str]] = []
         self.append_ranges: list[str | None] = []
 
@@ -50,6 +51,7 @@ class FakeWorksheet:
 
     def update(self, values=None, range_name=None, **_kwargs):
         self.updates.append((range_name, values))
+        self.update_options.append(_kwargs)
         return {}
 
     def get_values(self, _range_name: str) -> list[list[str]]:
@@ -98,6 +100,7 @@ def _ticket(sheet_row: int | None = None):
         closed_at=None,
         resolution="",
         sheet_row=sheet_row,
+        media_path="",
     )
 
 
@@ -125,8 +128,10 @@ def test_existing_headers_are_reused_and_missing_fields_added():
     assert ("A1", [["ID"]]) in header_updates
     assert ("C1", [["Issue"]]) in header_updates
     assert ("K1", [["Tanggal"]]) in header_updates
+    assert ("L1", [["Foto"]]) in header_updates
+    assert ("M1", [["Link Foto"]]) in header_updates
     row_ranges = {call[0] for call in ws.updates if call[0].endswith("2")}
-    assert row_ranges == {"A2:A2", "C2:K2"}
+    assert row_ranges == {"A2:A2", "C2:K2", "L2", "M2:M2"}
 
 
 def test_new_ticket_is_appended_with_only_required_headers_and_values():
@@ -146,9 +151,58 @@ def test_new_ticket_is_appended_with_only_required_headers_and_values():
         "Engineering",
         "",
         "",
+        "",
+        "",
     ]]
     header_cells = {call[1][0][0] for call in ws.updates if call[0].endswith("1")}
     assert header_cells == set(TICKET_HEADERS)
+
+
+def test_ticket_photo_is_written_as_image_formula_and_link():
+    settings_store.set("bot.public_url", "https://bot.perusahaan.co.id")
+    ws = FakeWorksheet("TICKETS")
+    client = _client(ws)
+    ticket = _ticket()
+    ticket.media_path = "media/tkt1120261/foto.jpg"
+
+    assert client.append_ticket(ticket, "TICKETS") == 2
+
+    photo_column = TICKET_HEADERS.index("Foto") + 1
+    link_column = TICKET_HEADERS.index("Link Foto") + 1
+    assert ws.appended[0][photo_column - 1] == ""
+    formula_update = next(
+        (call, options)
+        for call, options in zip(ws.updates, ws.update_options)
+        if call[0] == f"{chr(64 + photo_column)}2"
+    )
+    formula, options = formula_update
+    assert formula[1][0][0].startswith(
+        '=IMAGE("https://bot.perusahaan.co.id/media/tkt1120261/foto.jpg?'
+    )
+    assert options["raw"] is False
+    assert ws.appended[0][link_column - 1].startswith(
+        "https://bot.perusahaan.co.id/media/tkt1120261/foto.jpg?t="
+    )
+
+
+def test_updating_ticket_refreshes_embedded_image_formula():
+    settings_store.set("bot.public_url", "https://bot.perusahaan.co.id")
+    ws = FakeWorksheet("TICKETS", column_data=["ID", "tkt1120261"])
+    client = _client(ws)
+    ticket = _ticket(sheet_row=2)
+    ticket.media_path = "media/tkt1120261/foto.jpg"
+
+    assert client.update_ticket(ticket, "TICKETS") is True
+
+    image_column = TICKET_HEADERS.index("Foto") + 1
+    formula_update = next(
+        (call, options)
+        for call, options in zip(ws.updates, ws.update_options)
+        if call[0] == f"{chr(64 + image_column)}2"
+    )
+    formula, options = formula_update
+    assert formula[1][0][0].startswith("=IMAGE(")
+    assert options["raw"] is False
 
 
 def test_header_after_summary_row_is_preserved_and_used():

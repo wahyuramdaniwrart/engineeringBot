@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -32,6 +33,28 @@ router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals["now"] = now_local
 templates.env.filters["local_datetime"] = format_local_datetime
+
+
+def gallery_items(attachments: Any) -> str:
+    """Daftar foto ticket sebagai JSON untuk galeri di dashboard.
+
+    Dipakai lewat `data-gallery='...'` supaya klik ID ticket langsung
+    membuka galeri foto. Hanya URL root-relative (host browser yang dipakai),
+    bukan URL publik absolut — halaman dashboard tidak boleh membocorkan
+    alamat internal ke HTML.
+    """
+    items = []
+    for photo in attachments or []:
+        items.append(
+            {
+                "url": dashboard_media_url(photo.media_path),
+                "name": photo.media_filename or "",
+            }
+        )
+    return json.dumps(items)
+
+
+templates.env.globals["gallery_items"] = gallery_items
 
 serializer = URLSafeTimedSerializer(get_settings().secret_key, salt="bot-dashboard")
 COOKIE_NAME = "bot_dashboard_session"
@@ -64,6 +87,45 @@ def login_page(request: Request, error: str = "") -> HTMLResponse:
     return templates.TemplateResponse(
         request, "login.html", {"request": request, "error": error}, status_code=401
     )
+
+
+def _ticket_media_paths(ticket: Ticket) -> set[str]:
+    return {
+        item.media_path for item in ticket.media_attachments if item.media_path
+    }
+
+
+def _delete_ticket_media(media_paths: set[str]) -> int:
+    errors = 0
+    root = media_root().resolve()
+    for rel_path in media_paths:
+        normalized = rel_path.replace("\\", "/").lstrip("/")
+        if normalized.startswith("media/"):
+            normalized = normalized[len("media/") :]
+        parent = None
+        try:
+            target = media_file_path(normalized).resolve()
+            relative = target.relative_to(root)
+            if not relative.parts or (target.exists() and not target.is_file()):
+                raise ValueError("Path media bukan berkas")
+            if not target.exists():
+                continue
+            parent = target.parent
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        except ValueError:
+            errors += 1
+            log.error("Menolak menghapus path media di luar folder media: %s", rel_path)
+        except OSError as exc:
+            errors += 1
+            log.warning("Gagal menghapus berkas media %s: %s", rel_path, exc)
+        if parent is not None and parent != root:
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +252,12 @@ async def tickets_page(
     logs_deleted: int = 0,
     media_errors: int = 0,
     delete_error: str = "",
+    ticket_deleted: str = "",
+    ticket_delete_error: str = "",
+    reminder_updated: str = "",
+    reminder_cancelled: str = "",
+    reminder_error: str = "",
+    reminder_ticket_id: str = "",
 ):
     if (r := require_auth(request)) is not None:
         return r
@@ -206,17 +274,99 @@ async def tickets_page(
             "tickets": items,
             "groups": groups,
             "statuses": statuses,
+            "open_statuses": {
+                item["key"] for item in statuses if item.get("open")
+            },
             "f_status": status,
             "f_q": q,
             "f_group": group_id,
+            "reminder_timezone": settings_store.timezone(),
             "media_url": dashboard_media_url,
             "sheet_media_url": build_url,
             "deleted": deleted,
             "logs_deleted": logs_deleted,
             "media_errors": media_errors,
             "delete_error": delete_error,
+            "ticket_deleted": ticket_deleted,
+            "ticket_delete_error": ticket_delete_error,
+            "reminder_updated": reminder_updated,
+            "reminder_cancelled": reminder_cancelled,
+            "reminder_error": reminder_error,
+            "reminder_ticket_id": reminder_ticket_id,
         },
     )
+
+
+@router.post("/tickets/{ticket_id}/reminder")
+async def ticket_set_reminder(
+    request: Request,
+    ticket_id: str,
+    scheduled_at: str = Form(""),
+    cancel: str = Form(""),
+    return_status: str = Form(""),
+    return_q: str = Form(""),
+    return_group_id: str = Form(""),
+):
+    if (r := require_auth(request)) is not None:
+        return r
+
+    def redirect_to_list(**result: str):
+        params = {
+            key: value
+            for key, value in (
+                ("status", return_status),
+                ("q", return_q),
+                ("group_id", return_group_id),
+            )
+            if value
+        }
+        params.update({key: value for key, value in result.items() if value})
+        return RedirectResponse(
+            "/tickets?" + urlencode(params), status_code=303
+        )
+
+    from ..reminders import clear_ticket_reminder, parse_reminder_datetime
+
+    with session_scope() as s:
+        ticket = s.execute(
+            select(Ticket).where(func.lower(Ticket.ticket_id) == ticket_id.lower())
+        ).scalar_one_or_none()
+        if ticket is None:
+            return redirect_to_list(
+                reminder_error="not_found", reminder_ticket_id=ticket_id
+            )
+
+        if cancel:
+            if ticket.reminder_at is None:
+                return redirect_to_list(
+                    reminder_error="not_set",
+                    reminder_ticket_id=ticket.ticket_id,
+                )
+            clear_ticket_reminder(ticket)
+            return redirect_to_list(reminder_cancelled=ticket.ticket_id)
+
+        if not settings_store.is_open_status(ticket.status):
+            return redirect_to_list(
+                reminder_error="closed", reminder_ticket_id=ticket.ticket_id
+            )
+        if not ticket.group_id:
+            return redirect_to_list(
+                reminder_error="no_chat", reminder_ticket_id=ticket.ticket_id
+            )
+
+        try:
+            ticket.reminder_at = parse_reminder_datetime(
+                scheduled_at.strip().replace("T", " ")
+            )
+        except ValueError:
+            return redirect_to_list(
+                reminder_error="invalid", reminder_ticket_id=ticket.ticket_id
+            )
+        ticket.reminder_retry_at = None
+        ticket.reminder_last_sent_at = None
+        updated_ticket_id = ticket.ticket_id
+
+    return redirect_to_list(reminder_updated=updated_ticket_id)
 
 
 @router.post("/tickets/delete-all")
@@ -232,10 +382,6 @@ async def delete_all_tickets(request: Request, confirmation: str = Form("")):
     with session_scope() as s:
         tickets = s.execute(select(Ticket)).scalars().all()
         ticket_ids = [ticket.ticket_id for ticket in tickets]
-        for ticket in tickets:
-            media_paths.update(
-                item.media_path for item in ticket.media_attachments if item.media_path
-            )
         logs_deleted = 0
         if ticket_ids:
             result = s.execute(
@@ -243,42 +389,50 @@ async def delete_all_tickets(request: Request, confirmation: str = Form("")):
             )
             logs_deleted = result.rowcount or 0
         for ticket in tickets:
+            media_paths.update(_ticket_media_paths(ticket))
             s.delete(ticket)
         deleted = len(tickets)
 
-    media_errors = 0
-    root = media_root().resolve()
-    for rel_path in media_paths:
-        normalized = rel_path.replace("\\", "/").lstrip("/")
-        if normalized.startswith("media/"):
-            normalized = normalized[len("media/") :]
-        parent = None
-        try:
-            target = media_file_path(normalized).resolve()
-            relative = target.relative_to(root)
-            if not relative.parts or (target.exists() and not target.is_file()):
-                raise ValueError("Path media bukan berkas")
-            if not target.exists():
-                continue
-            parent = target.parent
-            target.unlink()
-        except FileNotFoundError:
-            pass
-        except ValueError:
-            media_errors += 1
-            log.error("Menolak menghapus path media di luar folder media: %s", rel_path)
-        except OSError as exc:
-            media_errors += 1
-            log.warning("Gagal menghapus berkas media %s: %s", rel_path, exc)
-        if parent is not None and parent != root:
-            try:
-                parent.rmdir()
-            except OSError:
-                pass
+    media_errors = _delete_ticket_media(media_paths)
 
     return RedirectResponse(
         f"/tickets?deleted={deleted}&logs_deleted={logs_deleted}"
         f"&media_errors={media_errors}",
+        status_code=303,
+    )
+
+
+@router.post("/tickets/{ticket_id}/delete")
+async def delete_ticket(
+    request: Request, ticket_id: str, confirmation: str = Form("")
+):
+    if (r := require_auth(request)) is not None:
+        return r
+    media_paths: set[str] = set()
+    with session_scope() as s:
+        ticket = s.execute(
+            select(Ticket).where(func.lower(Ticket.ticket_id) == ticket_id.lower())
+        ).scalar_one_or_none()
+        if ticket is None:
+            return RedirectResponse(
+                "/tickets?ticket_delete_error=not_found", status_code=303
+            )
+        if confirmation.strip() != ticket.ticket_id:
+            return RedirectResponse(
+                "/tickets?ticket_delete_error=confirmation", status_code=303
+            )
+        deleted_ticket = ticket.ticket_id
+        media_paths = _ticket_media_paths(ticket)
+        result = s.execute(
+            delete(MessageLog).where(MessageLog.ticket_ref == ticket.ticket_id)
+        )
+        logs_deleted = result.rowcount or 0
+        s.delete(ticket)
+
+    media_errors = _delete_ticket_media(media_paths)
+    return RedirectResponse(
+        f"/tickets?ticket_deleted={deleted_ticket}"
+        f"&logs_deleted={logs_deleted}&media_errors={media_errors}",
         status_code=303,
     )
 
@@ -319,7 +473,11 @@ async def ticket_detail(request: Request, ticket_id: str):
 
 @router.post("/tickets/{ticket_id}/status")
 async def ticket_set_status(
-    request: Request, ticket_id: str, status: str = Form(...), note: str = Form("")
+    request: Request,
+    background_tasks: BackgroundTasks,
+    ticket_id: str,
+    status: str = Form(...),
+    note: str = Form(""),
 ):
     if (r := require_auth(request)) is not None:
         return r
@@ -335,10 +493,13 @@ async def ticket_set_status(
             return JSONResponse({"ok": False, "error": "status tidak valid"}, 400)
         old_status = ticket.status
         ticket.status = status
-        if status == "SELESAI":
-            ticket.closed_at = utcnow()
-        elif ticket.closed_at:
+        if settings_store.is_open_status(status):
             ticket.closed_at = None
+        else:
+            ticket.closed_at = utcnow()
+            ticket.reminder_at = None
+            ticket.reminder_retry_at = None
+        note = note.strip()
         if note:
             ticket.resolution = note
         changes.append(f"Status: {old_status} → {status}")
@@ -346,19 +507,22 @@ async def ticket_set_status(
             changes.append(f"Catatan: {note}")
         s.flush()
         tid = ticket.ticket_id
-    from ..handlers import notify_ticket_change, sync_ticket_to_sheets
 
-    with session_scope() as s:
-        sync_ticket_to_sheets(s, tid)
-        ticket = s.execute(
-            select(Ticket).where(func.lower(Ticket.ticket_id) == tid.lower())
-        ).scalar_one()
-        notify_ticket_change(ticket, changes)
-    return RedirectResponse(f"/tickets/{ticket_id.lower()}", status_code=303)
+    # Sinkron Sheets + notifikasi grup dijalankan di background supaya halaman
+    # langsung merespon (tidak menunggu koneksi Sheets/WhatsApp).
+    background_tasks.add_task(_notify_ticket_update, tid, changes)
+    return RedirectResponse(
+        f"/tickets/{ticket_id.lower()}?saved=status", status_code=303
+    )
 
 
 @router.post("/tickets/{ticket_id}/pic")
-async def ticket_set_pic(request: Request, ticket_id: str, pic: str = Form(...)):
+async def ticket_set_pic(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    ticket_id: str,
+    pic: str = Form(...),
+):
     if (r := require_auth(request)) is not None:
         return r
     with session_scope() as s:
@@ -371,14 +535,27 @@ async def ticket_set_pic(request: Request, ticket_id: str, pic: str = Form(...))
         ticket.pic = pic
         s.flush()
         tid = ticket.ticket_id
-    from ..handlers import notify_ticket_change
 
-    with session_scope() as s:
-        ticket = s.execute(
-            select(Ticket).where(func.lower(Ticket.ticket_id) == tid.lower())
-        ).scalar_one()
-        notify_ticket_change(ticket, [f"PIC: {old_pic or '-'} → {pic}"])
-    return RedirectResponse(f"/tickets/{ticket_id.lower()}", status_code=303)
+    background_tasks.add_task(_notify_ticket_update, tid, [f"PIC: {old_pic or '-'} → {pic}"])
+    return RedirectResponse(
+        f"/tickets/{ticket_id.lower()}?saved=pic", status_code=303
+    )
+
+
+def _notify_ticket_update(ticket_id: str, changes: list[str]) -> None:
+    """Sinkron Sheets + kabari grup (background, tidak menahan response)."""
+    from ..handlers import notify_ticket_change, sync_ticket_to_sheets
+
+    try:
+        with session_scope() as s:
+            sync_ticket_to_sheets(s, ticket_id)
+            ticket = s.execute(
+                select(Ticket).where(func.lower(Ticket.ticket_id) == ticket_id.lower())
+            ).scalar_one_or_none()
+            if ticket is not None:
+                notify_ticket_change(ticket, changes)
+    except Exception as exc:  # pragma: no cover - background task tidak boleh gagal diam-diam
+        log.warning("Gagal sinkron/notifikasi ticket %s: %s", ticket_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +628,7 @@ async def group_toggle(request: Request, chat_id: str):
 async def group_update(
     request: Request,
     chat_id: str,
-    enabled: str = Form("on"),
+    enabled: str = Form(""),
     prefixes: str = Form(""),
     daily_summary: str = Form(""),
     log_messages: str = Form(""),
@@ -512,6 +689,23 @@ async def settings_page(request: Request):
         return r
     base = settings_store.public_url() or str(request.base_url).rstrip("/")
     webhook_url = settings_store.webhook_url(fallback=base)
+
+    # Status live WAHA & Sheets supaya tombol di halaman ini punya konteks
+    # (mis. "Tampilkan QR" hanya berguna saat session sudah ada).
+    waha = get_waha()
+    waha_status = ""
+    waha_error = ""
+    try:
+        waha_status = waha.status_text()
+    except Exception as exc:
+        waha_error = str(exc)
+    wstate = _waha_state()
+    if not waha_status:
+        waha_status = wstate.get("status") or ""
+    if not waha_error:
+        waha_error = wstate.get("error") or ""
+    sheets = get_sheets()
+
     return templates.TemplateResponse(
         request, "settings.html",
         {
@@ -520,9 +714,18 @@ async def settings_page(request: Request):
             "commands": settings_store.commands,
             "statuses": settings_store.statuses,
             "webhook_url": webhook_url,
+            "waha_status": waha_status or "tidak terhubung",
+            "waha_error": waha_error,
+            "wstate": wstate,
+            "sheets_ok": sheets.ready,
+            "sheets_error": sheets.last_error,
             "env": {
                 "waha_base_url": get_settings().waha_base_url,
                 "waha_session": get_settings().waha_session,
+                "google_sa_file": get_settings().google_sa_file,
+                "public_url": get_settings().public_url,
+                "waha_api_key_configured": bool(get_settings().waha_api_key),
+                "webhook_token_configured": bool(get_settings().webhook_token),
                 "spreadsheet_id": get_settings().spreadsheet_id,
             },
         },
@@ -536,7 +739,6 @@ def _collect_commands(form: dict[str, Any]) -> list[dict[str, Any]]:
     actions = form.getlist("cmd_action") if hasattr(form, "getlist") else []
     usages = form.getlist("cmd_usage") if hasattr(form, "getlist") else []
     descs = form.getlist("cmd_description") if hasattr(form, "getlist") else []
-    enabled = form.getlist("cmd_enabled") if hasattr(form, "getlist") else []
 
     out: list[dict[str, Any]] = []
     for i, name in enumerate(names):
@@ -551,7 +753,7 @@ def _collect_commands(form: dict[str, Any]) -> list[dict[str, Any]]:
                 "description": descs[i] if i < len(descs) else "",
                 "usage": usages[i] if i < len(usages) else "",
                 "action": actions[i] if i < len(actions) else "unknown",
-                "enabled": (enabled[i] if i < len(enabled) else "on") == "on",
+                "enabled": form.get(f"cmd_enabled_{i}") == "on",
                 "group_only": False,
             }
         )
@@ -561,7 +763,6 @@ def _collect_commands(form: dict[str, Any]) -> list[dict[str, Any]]:
 def _collect_statuses(form: dict[str, Any]) -> list[dict[str, Any]]:
     keys = form.getlist("st_key") if hasattr(form, "getlist") else []
     labels = form.getlist("st_label") if hasattr(form, "getlist") else []
-    opens = form.getlist("st_open") if hasattr(form, "getlist") else []
     trans = form.getlist("st_transitions") if hasattr(form, "getlist") else []
     colors = form.getlist("st_color") if hasattr(form, "getlist") else []
     out: list[dict[str, Any]] = []
@@ -574,7 +775,7 @@ def _collect_statuses(form: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "key": key,
                 "label": labels[i] if i < len(labels) else key,
-                "open": (opens[i] if i < len(opens) else "on") == "on",
+                "open": form.get(f"st_open_{i}") == "on",
                 "transitions": [
                     t.strip().upper()
                     for t in trans_raw.replace(";", ",").split(",")
@@ -601,7 +802,11 @@ async def settings_save(request: Request):
         "bot.reply_in_group": form.get("bot_reply_in_group") == "on",
         "bot.log_all_messages": form.get("bot_log_all_messages") == "on",
         "bot.daily_summary_enabled": form.get("bot_daily_summary_enabled") == "on",
-        "bot.daily_summary_hour": int(form.get("bot_daily_summary_hour") or 17),
+        "bot.daily_summary_hour": int(
+            form.get("bot_daily_summary_hour")
+            if form.get("bot_daily_summary_hour") not in (None, "")
+            else 17
+        ),
         "bot.daily_summary_minute": int(form.get("bot_daily_summary_minute") or 0),
         "bot.ticket_prefix": (str(form.get("bot_ticket_prefix") or "tkt")).strip().lower(),
         "bot.notify_dashboard_changes": form.get("bot_notify_dashboard_changes") == "on",
@@ -667,6 +872,7 @@ async def api_tickets(status: str = "", q: str = "", limit: int = 50):
                 "group": t.group_name or t.group_id,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
                 "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+                "reminder_at": t.reminder_at.isoformat() if t.reminder_at else None,
             }
             for t in items
         ]

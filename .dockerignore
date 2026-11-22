@@ -11,3 +11,4 @@ data_test
 secrets
 tests
 .env
+node_modules

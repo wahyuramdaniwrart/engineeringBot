@@ -300,7 +300,7 @@ def list_tickets(
     status: str | None = None,
     group_id: str | None = None,
     query: str | None = None,
-    limit: int = 50,
+    limit: int | None = 50,
 ) -> list[Ticket]:
     stmt = select(Ticket)
     if status and status.upper() != "SEMUA":
@@ -315,7 +315,9 @@ def list_tickets(
             | (Ticket.ticket_id.ilike(like))
             | (Ticket.pic.ilike(like))
         )
-    stmt = stmt.order_by(Ticket.created_at.desc()).limit(limit)
+    stmt = stmt.order_by(Ticket.created_at.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return list(session.execute(stmt).scalars().all())
 
 
@@ -378,6 +380,55 @@ def tickets_on(session: Session, day: datetime) -> list[Ticket]:
         .order_by(Ticket.created_at.asc())
     )
     return list(session.execute(stmt).scalars().all())
+
+
+def list_open_tickets(session: Session, limit: int = 500) -> list[Ticket]:
+    """Semua ticket yang BELUM selesai, berapa pun umur ticketnya.
+
+    Dipakai #list dan ringkasan (#info & harian): bagian "belum selesai"
+    harus menampilkan seluruh ticket yang masih berjalan, bukan hanya
+    ticket yang dibuat hari ini.
+    """
+    tickets = list(
+        session.execute(
+            select(Ticket).order_by(Ticket.created_at.asc()).limit(limit)
+        ).scalars().all()
+    )
+    return [t for t in tickets if settings_store.is_open_status(t.status)]
+
+
+def list_closed_tickets(
+    session: Session, day: datetime | None = None, limit: int = 500
+) -> list[Ticket]:
+    """Ticket yang sudah selesai (closed).
+
+    - `day` diisi  -> hanya ticket yang ditutup pada hari itu.
+    - `day` None  -> semua ticket yang sudah selesai, kapan pun.
+
+    Ticket lama yang belum punya `closed_at` (ditutup sebelum kolom itu
+    dipakai) dianggap selesai pada hari terakhir ticketnya diperbarui.
+    """
+    tickets = list(
+        session.execute(
+            select(Ticket).order_by(Ticket.created_at.asc()).limit(limit)
+        ).scalars().all()
+    )
+    closed = [t for t in tickets if not settings_store.is_open_status(t.status)]
+    if day is None:
+        return closed
+
+    start, end = day_bounds_utc(day)
+    out: list[Ticket] = []
+    for ticket in closed:
+        marker = ticket.closed_at or ticket.updated_at
+        if marker is None:
+            continue
+        if marker.tzinfo is None:
+            marker = marker.replace(tzinfo=timezone.utc)
+        marker = marker.astimezone(timezone.utc)
+        if start <= marker < end:
+            out.append(ticket)
+    return out
 
 
 # ---------------------------------------------------------------------------

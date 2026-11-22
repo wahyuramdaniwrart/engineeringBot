@@ -2,35 +2,50 @@
 {% block title %}Log — Bot Engineering{% endblock %}
 {% block nav_logs %}active{% endblock %}
 
-{% block header %}
-<div class="page-head"><h1>Log Pesan</h1></div>
+{% block heading %}Log Pesan{% endblock %}
+{% block subheading %}300 pesan terakhir yang tercatat{% endblock %}
+
+{% block topbar %}
+<label class="check select-none">
+  <input type="checkbox" id="live-reload"> <span class="mi">autorenew</span> Auto-refresh (10 dtk)
+</label>
 {% endblock %}
 
 {% block content %}
 <section class="card">
-  <form class="filter-bar" method="get" action="/logs">
-    <input type="text" name="q" value="{{ f_q }}" placeholder="Cari isi pesan">
-    <label class="check"><input type="checkbox" name="only_cmd" {% if f_cmd == 'on' %}checked{% endif %}> Hanya perintah</label>
-    <button class="btn primary" type="submit">Terapkan</button>
-    <a class="btn ghost" href="/logs">Reset</a>
+  <form class="mb-4 flex flex-wrap items-center gap-2" method="get" action="/logs">
+    <div class="relative min-w-[220px] flex-1">
+      <span class="mi pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
+      <input type="text" name="q" value="{{ f_q }}" placeholder="Cari isi pesan"
+             class="input mt-0 pl-10" data-table-search="log-table">
+    </div>
+    <label class="check">
+      <input type="checkbox" name="only_cmd" {% if f_cmd == 'on' %}checked{% endif %}> Hanya perintah
+    </label>
+    <button class="btn btn-primary" type="submit"><span class="mi">filter_alt</span> Terapkan</button>
+    <a class="btn btn-ghost" href="/logs"><span class="mi">restart_alt</span> Reset</a>
   </form>
 
-  <table class="table">
-    <thead><tr><th>Waktu</th><th>Grup</th><th>Pengirim</th><th>Pesan</th><th>Perintah</th><th>Hasil</th></tr></thead>
-    <tbody>
-    {% for l in logs %}
-      <tr>
-        <td class="muted small">{{ l.created_at|local_datetime('%d-%m %H:%M:%S') }}</td>
-        <td class="small">{{ l.chat_name or l.chat_id }}</td>
-        <td class="small">{{ l.sender or l.sender_phone }}</td>
-        <td class="small">{{ l.body[:140] }}</td>
-        <td>{% if l.is_command %}<span class="badge">{{ l.command }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
-        <td class="small muted">{{ l.result[:80] }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="6" class="muted">Belum ada log.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-scroll">
+    <table class="tbl" id="log-table">
+      <thead><tr><th>Waktu</th><th>Grup</th><th>Pengirim</th><th>Pesan</th><th>Perintah</th><th>Hasil</th></tr></thead>
+      <tbody>
+      {% for l in logs %}
+        <tr data-row-text="{{ (l.body or '') ~ ' ' ~ (l.chat_name or l.chat_id or '') ~ ' ' ~ (l.sender or l.sender_phone or '') ~ ' ' ~ (l.command or '') ~ ' ' ~ (l.result or '') }}">
+          <td class="whitespace-nowrap text-[11px] text-slate-500">{{ l.created_at|local_datetime('%d-%m %H:%M:%S') }}</td>
+          <td class="text-xs">{{ l.chat_name or l.chat_id }}</td>
+          <td class="text-xs">{{ l.sender or l.sender_phone }}</td>
+          <td class="max-w-[340px] text-xs">{{ l.body[:140] }}</td>
+          <td>{% if l.is_command %}<span class="badge bg-brand-100 text-brand-800">{{ l.command }}</span>{% else %}<span class="text-slate-400">-</span>{% endif %}</td>
+          <td class="max-w-[260px] text-xs text-slate-500">{{ l.result[:80] }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="py-8 text-center text-slate-500">Belum ada log.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="mt-3 text-[11px] text-slate-400" data-search-status></p>
 </section>
 {% endblock %}

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from . import media
@@ -30,7 +31,8 @@ from .commands import (
     split_ticket_and_rest,
 )
 from .config import get_settings
-from .models import Ticket, TicketMedia, utcnow
+from .models import ProcessedInboundMessage, Ticket, TicketMedia, utcnow
+from .reminders import clear_ticket_reminder, parse_reminder_datetime
 from .services import get_sheets, get_waha, sheets_enabled
 from .store import (
     add_log,
@@ -153,6 +155,7 @@ class InboundMessage:
     media_items: list[dict[str, str]] = field(default_factory=list)
     quoted_message_id: str = ""
     quoted_body: str = ""
+    session_name: str = "default"
 
     @property
     def sender(self) -> str:
@@ -336,7 +339,9 @@ def _quoted_message_details(payload: dict[str, Any]) -> tuple[str, str]:
     return "", ""
 
 
-def parse_waha_payload(payload: dict[str, Any]) -> InboundMessage | None:
+def parse_waha_payload(
+    payload: dict[str, Any], session_name: str = "default"
+) -> InboundMessage | None:
     """Ubah payload event WAHA menjadi InboundMessage."""
     if not isinstance(payload, dict):
         return None
@@ -377,6 +382,7 @@ def parse_waha_payload(payload: dict[str, Any]) -> InboundMessage | None:
     quoted_message_id, quoted_body = _quoted_message_details(payload)
     return InboundMessage(
         chat_id=chat_id,
+        session_name=session_name or "default",
         chat_name=str(data.get("chatName") or data.get("notifyName") or ""),
         is_group=chat_id.endswith("@g.us"),
         sender_phone=sender_phone,
@@ -446,6 +452,8 @@ def _reply_status(body: str) -> tuple[str, str] | None:
             phrases[label] = key
 
     text = (body or "").strip()
+    if text.startswith(("#", "/")):
+        text = text[1:].lstrip()
     for phrase, target in sorted(phrases.items(), key=lambda entry: len(entry[0]), reverse=True):
         match = re.match(
             rf"^{re.escape(phrase)}(?=$|[\s,;:.!?-])",
@@ -482,6 +490,7 @@ def _handle_quoted_status(session: Session, msg: InboundMessage) -> str | None:
             ticket.closed_at = None
         else:
             ticket.closed_at = utcnow()
+            clear_ticket_reminder(ticket)
         if note:
             ticket.resolution = note
         reply = replies.status_changed(ticket, old_status, ticket.resolution or "")
@@ -533,13 +542,32 @@ def handle_inbound(session: Session, msg: InboundMessage) -> str:
             if debug:
                 log.info("DIAG: pesan diabaikan (fromMe + abaikan pesan sendiri)")
             return ""
-    # Hanya pesan yang cocok dengan prefix dan perintah terdaftar diproses.
+
     prefixes = group_prefixes(session, msg.chat_id) or settings_store.prefixes
     cmd = parse_command(msg.body, prefixes, settings_store.commands)
-    if cmd is None:
+    actionable = bool(
+        cmd is not None
+        or msg.has_media
+        or msg.quoted_message_id
+        or msg.quoted_body
+    )
+    if msg.message_id and actionable and not _claim_inbound_message(session, msg):
+        if debug:
+            log.info(
+                "DIAG: pesan duplikat diabaikan (session=%s chat=%s id=%s)",
+                msg.session_name,
+                msg.chat_id,
+                msg.message_id,
+            )
+        return ""
+
+    if msg.quoted_message_id or msg.quoted_body:
         reply = _handle_quoted_status(session, msg)
         if reply is not None:
             return reply
+
+    # Hanya pesan yang cocok dengan prefix dan perintah terdaftar diproses.
+    if cmd is None:
         if msg.has_media:
             if msg.is_group:
                 grp = get_group(session, msg.chat_id)
@@ -599,7 +627,7 @@ def handle_inbound(session: Session, msg: InboundMessage) -> str:
         ticket_ref = ""
 
     # 4b. Lampirkan foto (bila ada) ke ticket tujuan.
-    if msg.has_media and ticket_ref:
+    if msg.has_media and ticket_ref and cmd.action != "detail":
         media_reply = attach_media_to_ticket(session, ticket_ref, msg)
         if cmd.action == "create":
             failures = [
@@ -616,8 +644,15 @@ def handle_inbound(session: Session, msg: InboundMessage) -> str:
     if reply and settings_store.get("bot.reply_in_group", True):
         await_send(session, msg, reply)
 
+    if (
+        cmd.action == "detail"
+        and ticket_ref
+        and settings_store.get("bot.reply_in_group", True)
+    ):
+        send_ticket_attachments(session, msg, ticket_ref)
+
     # 6. Sinkron Sheets.
-    if ticket_ref:
+    if ticket_ref and cmd.action != "detail":
         sync_ticket_to_sheets(session, ticket_ref)
 
     add_log(
@@ -640,6 +675,23 @@ def handle_inbound(session: Session, msg: InboundMessage) -> str:
     )
 
     return reply
+
+
+def _claim_inbound_message(session: Session, msg: InboundMessage) -> bool:
+    """Klaim ID pesan secara atomik; False berarti event ini sudah diproses."""
+    statement = (
+        sqlite_insert(ProcessedInboundMessage)
+        .values(
+            session_name=msg.session_name or "default",
+            chat_id=msg.chat_id,
+            message_id=msg.message_id,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["session_name", "chat_id", "message_id"]
+        )
+    )
+    result = session.execute(statement)
+    return result.rowcount == 1
 
 
 def await_send(session: Session, msg: InboundMessage, reply: str) -> None:
@@ -684,12 +736,16 @@ def dispatch(
         return handle_create(session, msg, cmd)
     if action == "status":
         return handle_status(session, msg, cmd)
+    if action == "detail":
+        return handle_detail(session, msg, cmd)
     if action == "pic":
         return handle_pic(session, msg, cmd)
     if action == "close":
         return handle_close(session, msg, cmd)
     if action == "cancel":
         return handle_cancel(session, msg, cmd)
+    if action == "reminder":
+        return handle_reminder(session, msg, cmd)
     if action == "list":
         return handle_list(session, msg, cmd)
     if action == "media":
@@ -804,7 +860,9 @@ def handle_status(
     if not rest:
         return format_ticket_detail(ticket), ticket.ticket_id
 
-    new_status = normalize_status_key(rest.split()[0])
+    status_token = rest.split(None, 1)[0]
+    new_status = normalize_status_key(status_token)
+    note = rest[len(status_token) :].strip()
     valid = settings_store.status_keys()
     if new_status not in valid:
         return replies.status_unknown(new_status, valid), ticket.ticket_id
@@ -817,17 +875,78 @@ def handle_status(
 
     old_status = ticket.status
     ticket.status = new_status
-    if new_status == "SELESAI":
+    if not settings_store.is_open_status(new_status):
         ticket.closed_at = utcnow()
-        if rest:
-            ticket.resolution = rest[len(rest.split()[0]) :].strip()
+        clear_ticket_reminder(ticket)
     else:
         ticket.closed_at = None
+    if note:
+        ticket.resolution = note
 
     return (
         replies.status_changed(ticket, old_status, ticket.resolution or ""),
         ticket.ticket_id,
     )
+
+
+def handle_detail(
+    session: Session, msg: InboundMessage, cmd: ParsedCommand
+) -> tuple[str, str]:
+    ticket_id, _rest = split_ticket_and_rest(cmd.args)
+    if not ticket_id:
+        return (
+            replies.format_error(
+                f"{cmd.prefix}detail <TICKET-ID>",
+                f"{cmd.prefix}detail tkt1120261",
+            ),
+            "",
+        )
+    ticket = get_ticket(session, ticket_id)
+    if ticket is None:
+        return replies.ticket_not_found(ticket_id), ""
+    return format_ticket_detail(ticket), ticket.ticket_id
+
+
+def send_ticket_attachments(
+    session: Session, msg: InboundMessage, ticket_id: str
+) -> None:
+    ticket = get_ticket(session, ticket_id)
+    if ticket is None:
+        return
+    attachments = ticket.media_attachments
+    if not attachments:
+        return
+
+    for index, photo in enumerate(attachments, 1):
+        filename = photo.media_filename or f"foto-{index}"
+        mimetype = photo.media_mimetype or ""
+        is_image = mimetype.lower().startswith("image/")
+        icon = "📷" if is_image else "📎"
+        try:
+            waha = get_waha()
+            send_media = waha.send_image if is_image else waha.send_file
+            send_media(
+                msg.chat_id,
+                media.build_url(photo.media_path),
+                caption=(
+                    f"{icon} *{ticket.ticket_id}* · "
+                    f"Lampiran {index}/{len(attachments)}: {filename}"
+                ),
+                mimetype=mimetype,
+                filename=filename,
+            )
+        except Exception as exc:
+            log.warning(
+                "Gagal mengirim foto ticket %s (%s): %s",
+                ticket.ticket_id,
+                filename,
+                exc,
+            )
+            await_send(
+                session,
+                msg,
+                replies.ticket_attachment_send_failed(ticket.ticket_id, filename),
+            )
 
 
 def handle_pic(
@@ -865,6 +984,7 @@ def handle_close(
         return replies.ticket_final(ticket), ticket.ticket_id
     ticket.status = "SELESAI"
     ticket.closed_at = utcnow()
+    clear_ticket_reminder(ticket)
     if rest:
         ticket.resolution = rest
     return (
@@ -887,12 +1007,53 @@ def handle_cancel(
         return replies.ticket_not_found(ticket_id), ""
     ticket.status = "DIBATALKAN"
     ticket.closed_at = utcnow()
+    clear_ticket_reminder(ticket)
     if rest:
         ticket.resolution = rest
     return (
         replies.ticket_cancelled(ticket, ticket.resolution or ""),
         ticket.ticket_id,
     )
+
+
+def handle_reminder(
+    session: Session, msg: InboundMessage, cmd: ParsedCommand
+) -> tuple[str, str]:
+    ticket_id, rest = split_ticket_and_rest(cmd.args)
+    if not ticket_id:
+        return (
+            replies.format_error(
+                f"{cmd.prefix}ingatkan <TICKET-ID> besok HH:MM | batal",
+                f"{cmd.prefix}ingatkan tkt1120261 besok 09:00",
+            ),
+            "",
+        )
+    ticket = get_ticket(session, ticket_id)
+    if ticket is None:
+        return replies.ticket_not_found(ticket_id), ""
+
+    instruction = rest.strip()
+    if not instruction:
+        return replies.ticket_reminder_status(ticket), ticket.ticket_id
+
+    if instruction.casefold() in {"batal", "hapus", "off"}:
+        if ticket.reminder_at is None:
+            return replies.ticket_reminder_not_set(ticket), ticket.ticket_id
+        clear_ticket_reminder(ticket)
+        return replies.ticket_reminder_cancelled(ticket), ticket.ticket_id
+
+    if not settings_store.is_open_status(ticket.status):
+        return replies.ticket_reminder_closed(ticket), ticket.ticket_id
+    if not ticket.group_id:
+        return replies.ticket_reminder_no_chat(ticket), ticket.ticket_id
+
+    try:
+        ticket.reminder_at = parse_reminder_datetime(instruction)
+    except ValueError as exc:
+        return replies.ticket_reminder_invalid(str(exc)), ticket.ticket_id
+    ticket.reminder_retry_at = None
+    ticket.reminder_last_sent_at = None
+    return replies.ticket_reminder_set(ticket), ticket.ticket_id
 
 
 # ---------------------------------------------------------------------------
@@ -1022,9 +1183,9 @@ def handle_media(
         return replies.ticket_not_found(ticket_id), ""
     if not msg.has_media:
         return (
-            "Tidak ada foto pada pesan ini.\n"
-            "Kirim foto beserta perintah, contoh: "
-            f"`{cmd.prefix}foto {ticket.ticket_id}`",
+            "⚠️ Tidak ada foto pada pesan ini.\n"
+            "📷 Kirim foto beserta perintah, contoh: "
+            f"{cmd.prefix}foto {ticket.ticket_id}",
             ticket.ticket_id,
         )
     # Unduhan & penyimpanan dilakukan oleh attach_media_to_ticket.
@@ -1037,18 +1198,26 @@ def handle_media(
 def handle_list(
     session: Session, msg: InboundMessage, cmd: ParsedCommand
 ) -> tuple[str, str]:
-    from .store import list_tickets
+    from .store import list_open_tickets, list_tickets
 
     status = ""
-    limit = 10
+    limit: int | None = None
     for token in cmd.arg_list:
-        if token.upper() in settings_store.status_keys() or token.upper() == "SEMUA":
-            status = token.upper()
+        normalized = normalize_status_key(token)
+        if normalized in settings_store.status_keys() or token.upper() == "SEMUA":
+            status = normalized if token.upper() != "SEMUA" else "SEMUA"
         elif token.isdigit():
             limit = min(int(token), 50)
-    tickets = list_tickets(session, status=status or None, limit=limit)
+
+    if status == "SEMUA":
+        tickets = list_tickets(session, limit=limit)
+    elif status:
+        tickets = list_tickets(session, status=status, limit=limit)
+    else:
+        tickets = list_open_tickets(session, limit=limit if limit is not None else 500)
+
     if not tickets:
-        return replies.ticket_list_empty(status), ""
+        return replies.ticket_list_empty(status or "belum selesai"), ""
 
     return replies.ticket_list(tickets, len(tickets)), ""
 
@@ -1059,26 +1228,28 @@ def handle_list(
 def handle_info(
     session: Session, msg: InboundMessage, cmd: ParsedCommand
 ) -> tuple[str, str]:
+    """Ringkasan ticket: semua yang belum selesai + yang selesai hari ini."""
+    from .store import list_closed_tickets, list_open_tickets
+
     scope = (cmd.args or "").strip().lower()
     day = now_local()
+    open_tickets = list_open_tickets(session)
     if scope in ("semua", "all"):
-        from .store import list_tickets
-
-        tickets = list_tickets(session, limit=200)
-    else:
-        from .store import tickets_on
-
-        tickets = tickets_on(session, day)
-
-    open_tickets = [t for t in tickets if settings_store.is_open_status(t.status)]
-    done_tickets = [t for t in tickets if not settings_store.is_open_status(t.status)]
-
-    if scope in ("semua", "all"):
+        # Scope "semua": ticket selesai kapan pun, tetap tanpa batas hari.
+        done_tickets = list_closed_tickets(session)
         header = "Ringkasan ticket (semua)"
-    else:
-        header = f"Ringkasan ticket hari ini ({day.strftime('%d-%m-%Y')})"
+        return (
+            replies.summary_block(
+                open_tickets,
+                done_tickets,
+                header,
+                done_label="Sudah selesai / ditutup",
+            ),
+            "",
+        )
 
-    return replies.summary_block(open_tickets, done_tickets, header), ""
+    done_tickets = list_closed_tickets(session, day)
+    return replies.info_summary(open_tickets, done_tickets, day), ""
 
 
 # ---------------------------------------------------------------------------
@@ -1116,11 +1287,14 @@ def sync_ticket_to_sheets(session: Session, ticket_id: str) -> None:
 def build_summary_rows(day: datetime | None = None) -> list[list[Any]]:
     """Baris untuk tab SUMMARY di Google Sheets."""
     from .db import session_scope
-    from .store import tickets_on
+    from .store import list_closed_tickets, list_open_tickets
 
     day = day or now_local()
     with session_scope() as s:
-        tickets = tickets_on(s, day)
+        open_tickets = list_open_tickets(s)
+        done_tickets = list_closed_tickets(s, day)
+
+    tickets = open_tickets + done_tickets
 
     counts: dict[str, int] = {}
     for t in tickets:
@@ -1151,13 +1325,12 @@ def build_summary_rows(day: datetime | None = None) -> list[list[Any]]:
 def daily_summary_text(day: datetime | None = None) -> str:
     """Teks ringkasan harian yang dikirim ke grup."""
     from .db import session_scope
-    from .store import tickets_on
+    from .store import list_closed_tickets, list_open_tickets
 
     day = day or now_local()
     with session_scope() as s:
-        tickets = tickets_on(s, day)
-    open_tickets = [t for t in tickets if settings_store.is_open_status(t.status)]
-    done_tickets = [t for t in tickets if not settings_store.is_open_status(t.status)]
+        open_tickets = list_open_tickets(s)
+        done_tickets = list_closed_tickets(s, day)
 
     return replies.daily_summary(open_tickets, done_tickets, day)
 
@@ -1182,6 +1355,8 @@ def notify_ticket_change(ticket, changes: list[str]) -> None:
 
 def send_daily_summary() -> None:
     """Kirim ringkasan harian ke semua grup yang mengaktifkan."""
+    from sqlalchemy import select
+
     from .db import session_scope
     from .models import GroupConfig
 
@@ -1189,7 +1364,7 @@ def send_daily_summary() -> None:
         return
     text = daily_summary_text(now_local())
     with session_scope() as s:
-        groups = s.execute(GroupConfig).scalars().all()
+        groups = s.execute(select(GroupConfig)).scalars().all()
         targets = [g for g in groups if g.enabled and g.daily_summary]
     if not targets:
         return

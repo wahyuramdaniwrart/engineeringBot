@@ -1,38 +1,152 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="scroll-smooth">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Bot WhatsApp Engineering{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
+  <link rel="preload" href="/static/fonts/MaterialSymbolsRounded.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/tailwind.css">
 </head>
-<body>
-<div class="layout">
-  <aside class="sidebar">
-    <div class="brand">
-      <span class="logo">🤖</span>
-      <div>
-        <div class="brand-title">Bot Engineering</div>
-        <div class="brand-sub">WhatsApp Ticketing</div>
+<body class="min-h-screen bg-slate-100">
+<div class="app-shell">
+  <div class="sidebar-backdrop" data-close-sidebar></div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="flex items-center gap-3 px-1">
+      <div class="brand-mark">
+        <span class="mi mi-fill">smart_toy</span>
       </div>
+      <div class="leading-tight">
+        <div class="text-[15px] font-bold text-white">Bot Engineering</div>
+        <div class="text-[11px] text-slate-400">WhatsApp Ticketing</div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-icon ml-auto text-slate-400 lg:hidden" data-close-sidebar aria-label="Tutup menu">
+        <span class="mi">close</span>
+      </button>
     </div>
-    <nav>
-      <a href="/" class="{% block nav_dash %}{% endblock %}">📊 Dashboard</a>
-      <a href="/tickets" class="{% block nav_tickets %}{% endblock %}">🎫 Tickets</a>
-      <a href="/groups" class="{% block nav_groups %}{% endblock %}">👥 Grup</a>
-      <a href="/logs" class="{% block nav_logs %}{% endblock %}">📜 Log Pesan</a>
-      <a href="/settings" class="{% block nav_settings %}{% endblock %}">⚙️ Pengaturan</a>
+
+    <nav class="flex flex-1 flex-col gap-1">
+      <a href="/" class="nav-link {% block nav_dash %}{% endblock %}">
+        <span class="mi">space_dashboard</span> Dashboard
+      </a>
+      <a href="/tickets" class="nav-link {% block nav_tickets %}{% endblock %}">
+        <span class="mi">confirmation_number</span> Tickets
+      </a>
+      <a href="/groups" class="nav-link {% block nav_groups %}{% endblock %}">
+        <span class="mi">groups</span> Grup
+      </a>
+      <a href="/logs" class="nav-link {% block nav_logs %}{% endblock %}">
+        <span class="mi">history</span> Log Pesan
+      </a>
+      <a href="/settings" class="nav-link {% block nav_settings %}{% endblock %}">
+        <span class="mi">settings</span> Pengaturan
+      </a>
     </nav>
-    <div class="sidebar-foot">
-      <a href="/logout" class="muted">↩ Keluar</a>
+
+    <div class="border-t border-slate-800 pt-3">
+      <div class="mb-2 flex items-center gap-2 rounded-lg bg-slate-800/60 px-3 py-2 text-[11px] text-slate-400">
+        <span class="relative flex h-2 w-2">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-70"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full bg-brand-400"></span>
+        </span>
+        Bot aktif
+      </div>
+      <a href="/logout" class="nav-link text-slate-400 hover:text-white">
+        <span class="mi">logout</span> Keluar
+      </a>
     </div>
   </aside>
 
-  <main class="content">
-    {% block header %}{% endblock %}
-    {% block content %}{% endblock %}
-  </main>
+  <div class="content-wrap">
+    <!-- Topbar -->
+    <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <div class="flex items-center gap-3 px-4 py-3 sm:px-6">
+        <button type="button" class="btn btn-icon lg:hidden" data-open-sidebar aria-label="Buka menu">
+          <span class="mi">menu</span>
+        </button>
+
+        <div class="min-w-0 flex-1">
+          <h1 class="page-title truncate">{% block heading %}{% endblock %}</h1>
+          <div class="page-sub truncate">{% block subheading %}{% endblock %}</div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          {% block topbar %}{% endblock %}
+        </div>
+      </div>
+      {% block tabs %}{% endblock %}
+    </header>
+
+    <main class="flex-1 px-4 py-5 sm:px-6 sm:py-6">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="border-t border-slate-200 px-4 py-4 text-center text-[11px] text-slate-400">
+      Bot Engineering &middot; WhatsApp Ticketing
+    </footer>
+  </div>
 </div>
+
+<!-- Toast container -->
+<div id="toast-wrap" class="pointer-events-none fixed right-4 top-4 z-[60] flex flex-col gap-2"></div>
+
+<!-- Modal umum -->
+<div id="modal" class="modal-backdrop">
+  <div class="w-full max-w-lg animate-slide-up rounded-2xl border border-slate-200 bg-white p-5 shadow-pop">
+    <div class="mb-3 flex items-start justify-between gap-4">
+      <h3 id="modal-title" class="flex items-center gap-2 text-base font-bold text-slate-900">
+        <span class="mi text-brand-600">info</span>
+        <span id="modal-title-text">Judul</span>
+      </h3>
+      <button type="button" class="btn btn-ghost btn-icon" data-close-modal aria-label="Tutup">
+        <span class="mi">close</span>
+      </button>
+    </div>
+    <div id="modal-body" class="text-sm text-slate-600"></div>
+  </div>
+</div>
+
+<!-- Galeri foto -->
+<div id="gallery" class="modal-backdrop !p-2 sm:!p-6">
+  <div class="flex max-h-[95vh] w-full max-w-5xl flex-col animate-slide-up gap-3">
+    <div class="flex items-center justify-between gap-3 text-white">
+      <div class="flex items-center gap-2 text-sm font-semibold">
+        <span class="mi">photo_library</span>
+        <span id="gallery-title">Foto</span>
+        <span id="gallery-counter" class="rounded-full bg-white/15 px-2 py-0.5 text-xs"></span>
+      </div>
+      <div class="flex items-center gap-2">
+        <a id="gallery-detail" class="btn btn-sm !border-white/30 !bg-white/10 !text-white hover:!bg-white/20" href="#" hidden>
+          <span class="mi">open_in_new</span> Detail ticket
+        </a>
+        <a id="gallery-open" class="btn btn-sm !border-white/30 !bg-white/10 !text-white hover:!bg-white/20" target="_blank" href="#">
+          <span class="mi">visibility</span> Ukuran penuh
+        </a>
+        <a id="gallery-download" data-gallery-download class="btn btn-sm !border-white/30 !bg-white/10 !text-white hover:!bg-white/20" href="#">
+          <span class="mi">download</span> Unduh
+        </a>
+        <button type="button" class="btn btn-icon !border-white/30 !bg-white/10 !text-white hover:!bg-white/20" data-close-gallery aria-label="Tutup galeri">
+          <span class="mi">close</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="gallery-main">
+      <button type="button" class="gallery-nav prev" data-gallery-prev aria-label="Foto sebelumnya">
+        <span class="mi">chevron_left</span>
+      </button>
+      <img id="gallery-image" src="" alt="Foto ticket" class="max-h-[70vh] w-auto max-w-full object-contain">
+      <video id="gallery-video" class="hidden max-h-[70vh] w-auto max-w-full" controls playsinline></video>
+      <button type="button" class="gallery-nav next" data-gallery-next aria-label="Foto berikutnya">
+        <span class="mi">chevron_right</span>
+      </button>
+    </div>
+
+    <div id="gallery-thumbs" class="flex gap-2 overflow-x-auto pb-1"></div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

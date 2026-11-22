@@ -166,18 +166,37 @@ def extract_mentions(text: str) -> tuple[str, list[str]]:
 
 
 def format_help(commands: list[dict[str, Any]], prefixes: list[str]) -> str:
-    """Buat teks bantuan perintah (plain text, tanpa emoji/markdown)."""
+    """Buat menu bantuan ringkas untuk WhatsApp."""
     prefixes = normalize_prefixes(prefixes)
     prefix = prefixes[0]
-    lines = ["Perintah yang tersedia:", ""]
+    icons = {
+        "create": "🎫",
+        "status": "🔄",
+        "detail": "🔍",
+        "pic": "👤",
+        "close": "✅",
+        "cancel": "🚫",
+        "reminder": "⏰",
+        "media": "📷",
+        "list": "📋",
+        "info": "📊",
+        "help": "❔",
+    }
+    lines = ["📚 *MENU PERINTAH BOT*", f"Gunakan prefix: {', '.join(prefixes)}", ""]
     for cmd in commands or []:
         if not cmd.get("enabled", True):
             continue
         aliases = cmd.get("aliases") or []
-        alias_txt = f" (alias: {', '.join('#' + str(a) for a in aliases)})" if aliases else ""
         usage = str(cmd.get("usage") or f"{prefix}{cmd.get('name')}").strip()
+        if usage.startswith(("#", "/")):
+            usage = f"{prefix}{usage[1:]}"
         desc = str(cmd.get("description") or "")
-        lines.append(f"{usage}\n   {desc}{alias_txt}")
+        icon = icons.get(str(cmd.get("action") or ""), "•")
+        lines.append(f"{icon} *{usage}*")
+        if desc:
+            lines.append(f"   {desc}")
+        if aliases:
+            lines.append(f"   Alias: {', '.join(prefix + str(alias) for alias in aliases)}")
         lines.append("")
-    lines.append(f"Prefix aktif: {', '.join(prefixes)}")
+    lines.append("ℹ️ Ganti TICKET-ID dengan ID tiket, mis. tkt1120261.")
     return "\n".join(lines)

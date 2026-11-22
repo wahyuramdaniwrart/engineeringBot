@@ -2,227 +2,412 @@
 {% block title %}Pengaturan — Bot Engineering{% endblock %}
 {% block nav_settings %}active{% endblock %}
 
-{% block header %}
-<div class="page-head">
-  <h1>Pengaturan</h1>
-  {% if request.query_params.get('saved') %}<span class="pill ok">Tersimpan</span>{% endif %}
-</div>
+{% block heading %}Pengaturan{% endblock %}
+{% block subheading %}Konfigurasi bot, WhatsApp, Google Sheets, dan jadwal ringkasan{% endblock %}
+
+{% block topbar %}
+{% if request.query_params.get('saved') %}<span class="pill pill-ok"><span class="mi">check_circle</span> Tersimpan</span>{% endif %}
+{% endblock %}
+
+{% block tabs %}
+<nav class="flex gap-1 overflow-x-auto px-2 sm:px-4" role="tablist">
+  <button type="button" class="tab-btn active" data-tab="tab-bot" role="tab">
+    <span class="mi">smart_toy</span> Perintah Bot
+  </button>
+  <button type="button" class="tab-btn" data-tab="tab-whatsapp" role="tab">
+    <span class="mi">chat</span> WhatsApp
+  </button>
+  <button type="button" class="tab-btn" data-tab="tab-sheets" role="tab">
+    <span class="mi">table_view</span> Google Sheets
+  </button>
+  <button type="button" class="tab-btn" data-tab="tab-jadwal" role="tab">
+    <span class="mi">schedule</span> Jadwal
+  </button>
+  <button type="button" class="tab-btn" data-tab="tab-daftar-perintah" role="tab">
+    <span class="mi">menu_book</span> Daftar Perintah
+  </button>
+  <button type="button" class="tab-btn" data-tab="tab-status" role="tab">
+    <span class="mi">account_tree</span> Status
+  </button>
+</nav>
 {% endblock %}
 
 {% block content %}
-<form method="post" action="/settings">
-  <div class="grid-2">
+<form method="post" action="/settings" id="settings-form">
 
-    <!-- ================= Perintah & perilaku bot ================= -->
-    <section class="card">
-      <h2>Perintah Bot</h2>
-      <div class="stack-sm">
-        <label>Prefix perintah (pisahkan dengan koma)
-          <input type="text" name="bot_prefixes" value="{{ (settings.get('bot.prefixes') or ['#'])|join(',') }}" placeholder="#,/">
-        </label>
-        <label>Prefix nomor ticket
-          <input type="text" name="bot_ticket_prefix" value="{{ (settings.get('bot.ticket_prefix') or 'tkt')|lower }}">
-          <span class="muted small">ID: prefix + bulan (MM) + tahun + urutan bulanan, tanpa pemisah.</span>
-        </label>
-        <label>Timezone
-          <input type="text" name="bot_timezone" value="{{ settings.get('bot.timezone') or 'Asia/Makassar' }}">
-        </label>
-        <label>Alamat server untuk tautan foto (URL publik)
-          <div class="row">
-            <input type="text" name="bot_public_url" value="{{ settings.get('bot.public_url') or '' }}"
-                   placeholder="https://bot.perusahaan.co.id">
-            <button class="btn" type="button" data-action="public-url-detect">Deteksi</button>
+  <!-- ================= Perintah & perilaku bot ================= -->
+  <div id="tab-bot" class="tab-panel active">
+    <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <section class="card">
+        <div class="card-head"><h2 class="card-title"><span class="mi">smart_toy</span> Perintah Bot</h2></div>
+        <p class="action-status" data-status></p>
+        <div class="space-y-4">
+          <div>
+            <label class="label" for="bot_prefixes">Prefix perintah (pisahkan dengan koma)</label>
+            <input type="text" name="bot_prefixes" id="bot_prefixes"
+                   value="{{ (settings.get('bot.prefixes') or ['#'])|join(',') }}" class="input" placeholder="#,/">
           </div>
-          <span class="muted small">Dipakai untuk tautan foto di Google Sheets.
-          Agar <strong>foto tampil langsung di dalam sel spreadsheet</strong>,
-          alamat ini harus <strong>publik</strong> (domain + reverse proxy atau
-          Cloudflare Tunnel) - server Google yang menarik gambarnya, bukan
-          browser pembaca, jadi IP LAN tidak bisa dipakai. Untuk link biasa
-          yang dibuka manual, IP LAN tetap boleh.</span>
-          {% set _pu = settings.get('bot.public_url') or '' %}
-          {% if not _pu or 'app:8080' in _pu or 'localhost' in _pu %}
-            <span class="muted small" style="color:#b45309;">Perhatian: alamat ini
-            masih kosong atau внутрен container — tautan foto di Sheets tidak
-            akan bisa dibuka rekan tim. Klik "Deteksi" lalu Simpan.</span>
-          {% endif %}
-        </label>
-        <label class="check"><input type="checkbox" name="bot_reply_in_group" {% if settings.get('bot.reply_in_group', True) %}checked{% endif %}> Balas di grup</label>
-        <label class="check"><input type="checkbox" name="bot_log_all_messages" {% if settings.get('bot.log_all_messages', True) %}checked{% endif %}> Simpan detail pesan perintah (audit)</label>
-        <label class="check"><input type="checkbox" name="bot_notify_dashboard_changes" {% if settings.get('bot.notify_dashboard_changes', True) %}checked{% endif %}> Kirim notifikasi ke grup saat ticket diubah dari dashboard</label>
-        <label class="check"><input type="checkbox" name="bot_ignore_own_messages" {% if settings.get('bot.ignore_own_messages', False) %}checked{% endif %}> Abaikan perintah yang dikirim dari perangkat tertaut (HP yang terhubung)</label>
-        <span class="muted small">Biarkan tidak dicentang agar perintah dari HP
-        yang terhubung juga diproses. Balasan bot sendiri tetap diabaikan.</span>
-      </div>
-    </section>
-
-    <!-- ================= WAHA ================= -->
-    <section class="card">
-      <h2>WAHA (WhatsApp) — koneksi otomatis</h2>
-      <p class="muted small">Cukup isi <strong>API Key</strong> lalu klik
-      <em>Deteksi Otomatis</em>: aplikasi akan mencari WAHA, membuat session bila
-      belum ada, dan mendaftarkan webhook sendiri. Tidak perlu lagi membuka
-      dashboard WAHA.</p>
-      <div class="stack-sm">
-        <label>Base URL WAHA
-          <div class="row">
-            <input type="text" name="waha_base_url" value="{{ settings.get('waha.base_url') or env.waha_base_url }}" placeholder="http://waha:3000">
-            <button class="btn" type="button" data-action="waha-detect">Deteksi otomatis</button>
+          <div>
+            <label class="label" for="bot_ticket_prefix">Prefix nomor ticket</label>
+            <input type="text" name="bot_ticket_prefix" id="bot_ticket_prefix"
+                   value="{{ (settings.get('bot.ticket_prefix') or 'tkt')|lower }}" class="input">
+            <span class="hint">ID: prefix + bulan (MM) + tahun + urutan bulanan, tanpa pemisah.</span>
           </div>
-          <span class="muted small">Dikosongkan = aplikasi mencoba sendiri
-          (<code>waha:3000</code>, <code>localhost:3000</code>, dan
-          <code>host.docker.internal:3000</code>).</span>
-        </label>
-        <label>API Key (X-Api-Key)
-          <input type="text" name="waha_api_key" value="{{ settings.get('waha.api_key') or '' }}" autocomplete="off">
-        </label>
-        <label>Nama session
-          <input type="text" name="waha_session" value="{{ settings.get('waha.session') or env.waha_session }}">
-        </label>
-        <label>URL aplikasi yang bisa dijangkau container WAHA (opsional)
-          <input type="text" name="waha_public_url" value="{{ settings.get('waha.public_url') or '' }}" placeholder="http://app:8080">
-          <span class="muted small">Dipakai saat mendaftarkan webhook. Kosongkan
-          bila dashboard diakses lewat URL yang sama dengan yang dilihat WAHA.</span>
-        </label>
-        <label class="check"><input type="checkbox" name="waha_auto_sync" {% if settings.get('waha.auto_sync', True) %}checked{% endif %}> Sinkron otomatis WAHA (status + webhook) berjalankan sendiri</label>
-        <label>Interval sinkron otomatis (detik)
-          <input type="number" name="waha_sync_interval" min="10" max="600" value="{{ settings.get('waha.sync_interval') or 30 }}">
-        </label>
-      </div>
-      <div class="row mt">
-        <button class="btn primary" type="button" data-action="waha-connect">🔗 Hubungkan sekarang</button>
-        <button class="btn" type="button" data-action="waha-qr">Tampilkan QR</button>
-      </div>
-      <p class="muted small" id="waha-out"></p>
-
-      <details class="muted small">
-        <summary>Detail lanjutan (token webhook / HMAC)</summary>
-        <div class="stack-sm mt">
-          <label>Token webhook (ditambahkan di URL sebagai <code>?token=...</code>)
-            <input type="text" name="waha_webhook_token" value="{{ settings.get('waha.webhook_token') or '' }}" autocomplete="off">
-          </label>
-          <label>HMAC key (alternatif token, lebih aman)
-            <input type="text" name="waha_hmac_key" value="{{ settings.get('waha.hmac_key') or '' }}" autocomplete="off">
-            <span class="muted small">Bila diisi, WAHA mengirim header
-            <code>X-Signature</code> (HMAC-SHA256 body) dan token di URL tidak diperlukan.</span>
-          </label>
-          <label>URL webhook siap pakai
-            <div class="row">
-              <input type="text" id="webhook-url" readonly value="{{ webhook_url }}">
-              <button class="btn" type="button" id="copy-webhook">Salin</button>
+          <div>
+            <label class="label" for="bot_timezone">Timezone</label>
+            <input type="text" name="bot_timezone" id="bot_timezone"
+                   value="{{ settings.get('bot.timezone') or 'Asia/Makassar' }}" class="input">
+          </div>
+          <div>
+            <label class="label" for="bot_public_url">Alamat server untuk tautan foto (URL publik)</label>
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="text" name="bot_public_url" id="bot_public_url"
+                     value="{{ settings.get('bot.public_url') or '' }}" class="input mt-0 flex-1"
+                     placeholder="https://bot.perusahaan.co.id">
+              <button class="btn" type="button" data-action="public-url-detect">
+                <span class="mi">location_searching</span> Deteksi
+              </button>
             </div>
+            <span class="hint">
+              Dipakai untuk tautan foto di Google Sheets. Agar <strong>foto tampil langsung di dalam sel spreadsheet</strong>,
+              alamat ini harus <strong>publik</strong> (domain + reverse proxy atau Cloudflare Tunnel) — server Google yang
+              menarik gambarnya, bukan browser pembaca, jadi IP LAN tidak bisa dipakai. Untuk link biasa yang dibuka manual,
+              IP LAN tetap boleh.
+            </span>
+            {% set _pu = settings.get('bot.public_url') or '' %}
+            <span class="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700"
+                  id="public-url-warning" {% if _pu and 'app:8080' not in _pu and 'localhost' not in _pu %}hidden{% endif %}>
+              <span class="mi">warning</span>
+              <span>Perhatian: alamat ini masih kosong atau internal container — foto di dalam sel Sheets tidak akan
+              tampil. Klik "Deteksi" lalu Simpan.</span>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2 class="card-title"><span class="mi">tune</span> Perilaku</h2></div>
+        <div class="space-y-3">
+          <label class="check">
+            <input type="checkbox" name="bot_reply_in_group" {% if settings.get('bot.reply_in_group', True) %}checked{% endif %}> Balas di grup
           </label>
+          <label class="check">
+            <input type="checkbox" name="bot_log_all_messages" {% if settings.get('bot.log_all_messages', True) %}checked{% endif %}> Simpan detail pesan perintah (audit)
+          </label>
+          <label class="check">
+            <input type="checkbox" name="bot_notify_dashboard_changes" {% if settings.get('bot.notify_dashboard_changes', True) %}checked{% endif %}> Kirim notifikasi ke grup saat ticket diubah dari dashboard
+          </label>
+          <label class="check">
+            <input type="checkbox" name="bot_ignore_own_messages" {% if settings.get('bot.ignore_own_messages', False) %}checked{% endif %}> Abaikan perintah yang dikirim dari perangkat tertaut (HP yang terhubung)
+          </label>
+          <p class="hint">
+            Biarkan tidak dicentang agar perintah dari HP yang terhubung juga diproses.
+            Balasan bot sendiri tetap diabaikan.
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ================= WAHA ================= -->
+  <div id="tab-whatsapp" class="tab-panel">
+    <section class="card">
+      <div class="card-head">
+        <h2 class="card-title"><span class="mi">chat</span> WAHA (WhatsApp) — koneksi otomatis</h2>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn" type="button" data-action="waha-status">
+            <span class="mi">sensors</span> Cek status
+          </button>
+          <button class="btn btn-primary" type="button" data-action="waha-connect">
+            <span class="mi">link</span> Hubungkan sekarang
+          </button>
+          <button class="btn" type="button" data-action="waha-qr">
+            <span class="mi">qr_code_2</span> Tampilkan QR
+          </button>
+        </div>
+      </div>
+      <p class="action-status" data-status></p>
+      <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3" id="waha-info">
+        <div class="rounded-xl border border-slate-200 p-3">
+          <div class="stat-label">Status session</div>
+          <div class="mt-1 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+            <span class="mi {{ 'text-emerald-600' if waha_status not in ('tidak terhubung','') else 'text-red-500' }}">
+              {{ 'sensors' if waha_status not in ('tidak terhubung','') else 'cloud_off' }}
+            </span>
+            <span id="waha-status">{{ wstate.status or waha_status }}</span>
+          </div>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-3">
+          <div class="stat-label">Webhook</div>
+          <div class="mt-1 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+            <span class="mi {{ 'text-emerald-600' if wstate.webhook_ok else 'text-amber-600' }}">
+              {{ 'check_circle' if wstate.webhook_ok else 'warning' }}
+            </span>
+            <span id="waha-webhook">{{ 'sinkron' if wstate.webhook_ok else 'belum sinkron' }}</span>
+          </div>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-3">
+          <div class="stat-label">Google Sheets</div>
+          <div class="mt-1 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+            <span class="mi {{ 'text-emerald-600' if sheets_ok else 'text-red-500' }}">
+              {{ 'cloud_done' if sheets_ok else 'cloud_off' }}
+            </span>
+            <span>{{ 'terhubung' if sheets_ok else 'belum terhubung' }}</span>
+          </div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-500">
+        Cukup isi <strong>API Key</strong> lalu klik <em>Deteksi Otomatis</em>: aplikasi akan mencari WAHA,
+        membuat session bila belum ada, dan mendaftarkan webhook sendiri. Tidak perlu lagi membuka dashboard WAHA.
+      </p>
+
+      <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <label class="label" for="waha_base_url">Base URL WAHA</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <input type="text" name="waha_base_url" id="waha_base_url"
+                   value="{{ settings.get('waha.base_url') or env.waha_base_url }}" class="input mt-0 flex-1"
+                   placeholder="http://waha:3000">
+            <button class="btn" type="button" data-action="waha-detect">
+              <span class="mi">location_searching</span> Deteksi otomatis
+            </button>
+          </div>
+          <span class="hint">Dikosongkan = aplikasi mencoba sendiri (<code>waha:3000</code>, <code>localhost:3000</code>, dan <code>host.docker.internal:3000</code>).</span>
+        </div>
+        <div>
+          <label class="label" for="waha_api_key">API Key (X-Api-Key)</label>
+          <input type="text" name="waha_api_key" id="waha_api_key" value="{{ settings.get('waha.api_key') or '' }}"
+                 class="input" autocomplete="off"
+                 placeholder="{{ 'Sudah diatur dari environment' if env.waha_api_key_configured and not settings.get('waha.api_key') else '' }}">
+          {% if env.waha_api_key_configured and not settings.get('waha.api_key') %}
+            <span class="hint">API key tersedia dari konfigurasi environment dan tidak ditampilkan di dashboard.</span>
+          {% endif %}
+        </div>
+        <div>
+          <label class="label" for="waha_session">Nama session</label>
+          <input type="text" name="waha_session" id="waha_session" value="{{ settings.get('waha.session') or env.waha_session }}" class="input">
+        </div>
+        <div>
+          <label class="label" for="waha_public_url">URL aplikasi yang bisa dijangkau container WAHA (opsional)</label>
+          <input type="text" name="waha_public_url" id="waha_public_url"
+                 value="{{ settings.get('waha.public_url') or env.public_url }}" class="input" placeholder="http://app:8080">
+          <span class="hint">Dipakai saat mendaftarkan webhook. Kosongkan bila dashboard diakses lewat URL yang sama dengan yang dilihat WAHA.</span>
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label class="check">
+          <input type="checkbox" name="waha_auto_sync" {% if settings.get('waha.auto_sync', True) %}checked{% endif %}> Sinkron otomatis WAHA (status + webhook) berjalankan sendiri
+        </label>
+        <div>
+          <label class="label" for="waha_sync_interval">Interval sinkron otomatis (detik)</label>
+          <input type="number" name="waha_sync_interval" id="waha_sync_interval" min="10" max="600"
+                 value="{{ settings.get('waha.sync_interval') or 30 }}" class="input">
+        </div>
+      </div>
+
+      <p class="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500" id="waha-out"></p>
+
+      <details class="acc mt-4">
+        <summary>
+          <span class="flex items-center gap-2"><span class="mi">tune</span> Detail lanjutan (token webhook / HMAC)</span>
+          <span class="mi">expand_more</span>
+        </summary>
+        <div class="acc-body space-y-4">
+          <div>
+            <label class="label" for="waha_webhook_token">Token webhook (ditambahkan di URL sebagai <code>?token=...</code>)</label>
+            <input type="text" name="waha_webhook_token" id="waha_webhook_token"
+                   value="{{ settings.get('waha.webhook_token') or '' }}" class="input" autocomplete="off"
+                   placeholder="{{ 'Sudah diatur dari environment' if env.webhook_token_configured and not settings.get('waha.webhook_token') else '' }}">
+            {% if env.webhook_token_configured and not settings.get('waha.webhook_token') %}
+              <span class="hint">Token tersedia dari konfigurasi environment dan tidak ditampilkan di dashboard.</span>
+            {% endif %}
+          </div>
+          <div>
+            <label class="label" for="waha_hmac_key">HMAC key (alternatif token, lebih aman)</label>
+            <input type="text" name="waha_hmac_key" id="waha_hmac_key"
+                   value="{{ settings.get('waha.hmac_key') or '' }}" class="input" autocomplete="off">
+            <span class="hint">Bila diisi, WAHA mengirim header <code>X-Signature</code> (HMAC-SHA256 body) dan token di URL tidak diperlukan.</span>
+          </div>
+          <div>
+            <label class="label" for="webhook-url">URL webhook siap pakai</label>
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="text" id="webhook-url" readonly value="{{ webhook_url }}" class="input mt-0 flex-1 font-mono text-xs">
+              <button class="btn" type="button" id="copy-webhook">
+                <span class="mi">content_copy</span> Salin
+              </button>
+            </div>
+          </div>
         </div>
       </details>
     </section>
+  </div>
 
-    <!-- ================= Google Sheets ================= -->
+  <!-- ================= Google Sheets ================= -->
+  <div id="tab-sheets" class="tab-panel">
     <section class="card">
-      <h2>Google Sheets</h2>
-      <div class="stack-sm">
-        <label>Spreadsheet ID
-          <input type="text" name="sheet_spreadsheet_id" value="{{ settings.get('sheet.spreadsheet_id') or env.spreadsheet_id }}">
-        </label>
-        <label>Path service account (JSON)
-          <input type="text" name="sheet_credentials_file" value="{{ settings.get('sheet.credentials_file') or '' }}" placeholder="/run/secrets/service-account.json">
-        </label>
-        <label>Atau paste isi JSON service account
-          <textarea name="sheet_credentials_json" rows="3" placeholder='{"type":"service_account", ...}'>{{ settings.get('sheet.credentials_json') or '' }}</textarea>
-        </label>
-        <p class="muted small">Ticket ditulis ke tab <strong>TICKETS</strong>. Log dan ringkasan tetap tersedia di dashboard/WhatsApp, tidak dibuat di Sheets.</p>
-        <label class="check"><input type="checkbox" name="sheet_enabled" {% if settings.get('sheet.enabled', True) %}checked{% endif %}> Aktifkan sinkron Google Sheets</label>
-        <label class="check"><input type="checkbox" name="sheet_auto_sync" {% if settings.get('sheet.auto_sync', True) %}checked{% endif %}> Sinkron otomatis setiap perubahan ticket</label>
-      </div>
-      <div class="row mt">
-        <button class="btn" type="button" data-action="sheets-test">Tes koneksi</button>
-        <button class="btn" type="button" data-action="sheets-sync">Sinkron semua ticket</button>
-      </div>
-      <p class="muted small" id="sheets-out"></p>
-    </section>
-
-    <!-- ================= Jadwal ================= -->
-    <section class="card">
-      <h2>Ringkasan Harian</h2>
-      <div class="stack-sm">
-        <label class="check"><input type="checkbox" name="bot_daily_summary_enabled" {% if settings.get('bot.daily_summary_enabled', True) %}checked{% endif %}> Kirim ringkasan harian otomatis</label>
-        <div class="grid-2">
-          <label>Jam<input type="number" name="bot_daily_summary_hour" min="0" max="23" value="{{ settings.get('bot.daily_summary_hour') or 17 }}"></label>
-          <label>Menit<input type="number" name="bot_daily_summary_minute" min="0" max="59" value="{{ settings.get('bot.daily_summary_minute') or 0 }}"></label>
+      <div class="card-head">
+        <h2 class="card-title"><span class="mi">table_view</span> Google Sheets</h2>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn" type="button" data-action="sheets-test">
+            <span class="mi">network_check</span> Tes koneksi
+          </button>
+          <button class="btn btn-primary" type="button" data-action="sheets-sync">
+            <span class="mi">cloud_upload</span> Sinkron semua ticket
+          </button>
         </div>
       </div>
-      <p class="muted small">Ringkasan dikirim ke setiap grup yang mengaktifkan
-      "Ringkasan harian" pada halaman Grup. Bot juga bisa membalas ringkasan on-demand
-      lewat perintah <code>#info</code>.</p>
+      <p class="action-status" data-status></p>
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <label class="label" for="sheet_spreadsheet_id">Spreadsheet ID</label>
+          <input type="text" name="sheet_spreadsheet_id" id="sheet_spreadsheet_id"
+                 value="{{ settings.get('sheet.spreadsheet_id') or env.spreadsheet_id }}" class="input">
+        </div>
+        <div>
+          <label class="label" for="sheet_credentials_file">Path service account (JSON)</label>
+          <input type="text" name="sheet_credentials_file" id="sheet_credentials_file"
+                 value="{{ settings.get('sheet.credentials_file') or env.google_sa_file }}" class="input"
+                 placeholder="/run/secrets/service-account.json">
+        </div>
+        <div class="lg:col-span-2">
+          <label class="label" for="sheet_credentials_json">Atau paste isi JSON service account</label>
+          <textarea name="sheet_credentials_json" id="sheet_credentials_json" rows="3" class="input"
+                    placeholder='{"type":"service_account", ...}'>{{ settings.get('sheet.credentials_json') or '' }}</textarea>
+        </div>
+      </div>
+      <p class="hint">Ticket ditulis ke tab <strong>TICKETS</strong>. Log dan ringkasan tetap tersedia di dashboard/WhatsApp, tidak dibuat di Sheets.</p>
+      <div class="mt-3 space-y-3">
+        <label class="check">
+          <input type="checkbox" name="sheet_enabled" {% if settings.get('sheet.enabled', True) %}checked{% endif %}> Aktifkan sinkron Google Sheets
+        </label>
+        <label class="check">
+          <input type="checkbox" name="sheet_auto_sync" {% if settings.get('sheet.auto_sync', True) %}checked{% endif %}> Sinkron otomatis setiap perubahan ticket
+        </label>
+      </div>
+      <p class="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500" id="sheets-out">
+        {% if not sheets_ok and sheets_error %}
+          <span class="mi align-middle text-red-500">error</span>
+          {{ sheets_error }}
+        {% endif %}
+      </p>
+    </section>
+  </div>
+
+  <!-- ================= Jadwal ================= -->
+  <div id="tab-jadwal" class="tab-panel">
+    <section class="card">
+      <div class="card-head"><h2 class="card-title"><span class="mi">schedule</span> Ringkasan Harian</h2></div>
+      <div class="space-y-4">
+        <label class="check">
+          <input type="checkbox" name="bot_daily_summary_enabled" {% if settings.get('bot.daily_summary_enabled', True) %}checked{% endif %}> Kirim ringkasan harian otomatis
+        </label>
+        <div class="grid grid-cols-2 gap-4 sm:max-w-sm">
+          <div>
+            <label class="label" for="bot_daily_summary_hour">Jam</label>
+            <input type="number" name="bot_daily_summary_hour" id="bot_daily_summary_hour" min="0" max="23"
+                   value="{{ settings.get('bot.daily_summary_hour', 17) }}" class="input">
+          </div>
+          <div>
+            <label class="label" for="bot_daily_summary_minute">Menit</label>
+            <input type="number" name="bot_daily_summary_minute" id="bot_daily_summary_minute" min="0" max="59"
+                   value="{{ settings.get('bot.daily_summary_minute') or 0 }}" class="input">
+          </div>
+        </div>
+        <p class="hint">
+          Ringkasan dikirim ke setiap grup yang mengaktifkan "Ringkasan harian" pada halaman Grup.
+          Bot juga bisa membalas ringkasan on-demand lewat perintah <code>#info</code>.
+        </p>
+      </div>
     </section>
   </div>
 
   <!-- ================= Daftar perintah ================= -->
-  <section class="card">
-    <div class="card-head">
-      <h2>Daftar Perintah</h2>
-      <button class="btn ghost" type="button" id="add-cmd">+ Tambah perintah</button>
-    </div>
-    <p class="muted small">Aksi yang tersedia: <code>create</code>, <code>status</code>,
-    <code>pic</code>, <code>close</code>, <code>cancel</code>, <code>list</code>,
-    <code>info</code>, <code>help</code>.</p>
-    <div class="table-scroll">
-      <table class="table" id="cmd-table">
-        <thead><tr>
-          <th>Nam</th><th>Alias</th><th>Aksi</th><th>Format</th><th>Deskripsi</th><th>Aktif</th><th></th>
-        </tr></thead>
-        <tbody>
-        {% for c in commands %}
-          <tr>
-            <td><input type="text" name="cmd_name" value="{{ c.name }}"></td>
-            <td><input type="text" name="cmd_aliases" value="{{ (c.aliases or [])|join(',') }}"></td>
-            <td>
-              <select name="cmd_action">
-                {% for a in ['create','status','pic','close','cancel','list','info','help'] %}
-                  <option value="{{ a }}" {% if c.action == a %}selected{% endif %}>{{ a }}</option>
-                {% endfor %}
-              </select>
-            </td>
-            <td><input type="text" name="cmd_usage" value="{{ c.usage }}"></td>
-            <td><input type="text" name="cmd_description" value="{{ c.description }}"></td>
-            <td class="center"><input type="checkbox" name="cmd_enabled" {% if c.enabled %}checked{% endif %}></td>
-            <td><button type="button" class="btn small danger rm-row">✕</button></td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+  <div id="tab-daftar-perintah" class="tab-panel">
+    <section class="card">
+      <div class="card-head">
+        <h2 class="card-title"><span class="mi">menu_book</span> Daftar Perintah</h2>
+        <button class="btn" type="button" id="add-cmd"><span class="mi">add</span> Tambah perintah</button>
+      </div>
+      <p class="hint mb-3">Aksi yang tersedia: <code>create</code>, <code>status</code>, <code>pic</code>, <code>close</code>, <code>cancel</code>, <code>list</code>, <code>info</code>, <code>help</code>.</p>
+      <div class="tbl-scroll">
+        <table class="tbl" id="cmd-table">
+          <thead><tr>
+            <th>Nama</th><th>Alias</th><th>Aksi</th><th>Format</th><th>Deskripsi</th><th class="text-center">Aktif</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% for c in commands %}
+            <tr data-row-index="{{ loop.index0 }}">
+              <td><input type="text" name="cmd_name" value="{{ c.name }}" class="input mt-0"></td>
+              <td><input type="text" name="cmd_aliases" value="{{ (c.aliases or [])|join(',') }}" class="input mt-0"></td>
+              <td>
+                <select name="cmd_action" class="input mt-0">
+                  {% for a in ['create','status','pic','close','cancel','list','info','help'] %}
+                    <option value="{{ a }}" {% if c.action == a %}selected{% endif %}>{{ a }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td><input type="text" name="cmd_usage" value="{{ c.usage }}" class="input mt-0"></td>
+              <td><input type="text" name="cmd_description" value="{{ c.description }}" class="input mt-0"></td>
+              <td class="text-center"><input type="checkbox" name="cmd_enabled_{{ loop.index0 }}" {% if c.enabled %}checked{% endif %} class="h-4 w-4 rounded border-slate-300 text-brand-600"></td>
+              <td><button type="button" class="btn btn-danger btn-sm rm-row" title="Hapus baris"><span class="mi">close</span></button></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
 
   <!-- ================= Status & transisi ================= -->
-  <section class="card">
-    <div class="card-head">
-      <h2>Status & Transisi</h2>
-      <button class="btn ghost" type="button" id="add-st">+ Tambah status</button>
-    </div>
-    <p class="muted small">Status bertanda "aktif" dianggap masih dikerjakan
-    (masuk kategori <em>belum selesai</em> pada ringkasan).</p>
-    <div class="table-scroll">
-      <table class="table" id="st-table">
-        <thead><tr>
-          <th>Kode</th><th>Label</th><th>Masih dikerjakan</th><th>Boleh berubah ke</th><th>Warna</th><th></th>
-        </tr></thead>
-        <tbody>
-        {% for s in statuses %}
-          <tr>
-            <td><input type="text" name="st_key" value="{{ s.key }}"></td>
-            <td><input type="text" name="st_label" value="{{ s.label }}"></td>
-            <td class="center"><input type="checkbox" name="st_open" {% if s.open %}checked{% endif %}></td>
-            <td><input type="text" name="st_transitions" value="{{ (s.transitions or [])|join(',') }}"></td>
-            <td><input type="text" name="st_color" value="{{ s.color }}"></td>
-            <td><button type="button" class="btn small danger rm-row">✕</button></td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+  <div id="tab-status" class="tab-panel">
+    <section class="card">
+      <div class="card-head">
+        <h2 class="card-title"><span class="mi">account_tree</span> Status &amp; Transisi</h2>
+        <button class="btn" type="button" id="add-st"><span class="mi">add</span> Tambah status</button>
+      </div>
+      <p class="hint mb-3">Status bertanda "aktif" dianggap masih dikerjakan (masuk kategori <em>belum selesai</em> pada ringkasan).</p>
+      <div class="tbl-scroll">
+        <table class="tbl" id="st-table">
+          <thead><tr>
+            <th>Kode</th><th>Label</th><th class="text-center">Masih dikerjakan</th><th>Boleh berubah ke</th><th>Warna</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% for s in statuses %}
+            <tr data-row-index="{{ loop.index0 }}">
+              <td><input type="text" name="st_key" value="{{ s.key }}" class="input mt-0"></td>
+              <td><input type="text" name="st_label" value="{{ s.label }}" class="input mt-0"></td>
+              <td class="text-center"><input type="checkbox" name="st_open_{{ loop.index0 }}" {% if s.open %}checked{% endif %} class="h-4 w-4 rounded border-slate-300 text-brand-600"></td>
+              <td><input type="text" name="st_transitions" value="{{ (s.transitions or [])|join(',') }}" class="input mt-0"></td>
+              <td><input type="text" name="st_color" value="{{ s.color }}" class="input mt-0 w-28"></td>
+              <td><button type="button" class="btn btn-danger btn-sm rm-row" title="Hapus baris"><span class="mi">close</span></button></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
 
-  <div class="row mt">
-    <button class="btn primary" type="submit">💾 Simpan Pengaturan</button>
+  <!-- Sticky save bar -->
+  <div class="sticky bottom-0 z-10 -mx-4 mt-5 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="dirty-badge" id="dirty-badge">
+          <span class="mi">edit</span> Perubahan belum disimpan
+        </span>
+        <p class="text-[11px] text-slate-500">Perubahan berlaku setelah disimpan dan langsung dipakai bot.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/" class="btn btn-ghost">Batal</a>
+        <button class="btn" type="button" id="discard-settings">
+          <span class="mi">restart_alt</span> Buang perubahan
+        </button>
+        <button class="btn btn-primary" type="submit" id="save-settings">
+          <span class="mi">save</span> Simpan Pengaturan
+        </button>
+      </div>
+    </div>
   </div>
 </form>
 {% endblock %}

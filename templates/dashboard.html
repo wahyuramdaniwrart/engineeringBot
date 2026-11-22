@@ -2,150 +2,325 @@
 {% block title %}Dashboard — Bot Engineering{% endblock %}
 {% block nav_dash %}active{% endblock %}
 
-{% block header %}
-<div class="page-head">
-  <h1>Dashboard</h1>
-  <div class="head-actions">
-    <span class="pill {{ 'ok' if waha_status not in ('tidak terhubung','') else 'bad' }}" id="waha-pill">
-      WAHA: <span id="waha-pill-text">{{ waha_status }}</span>
-    </span>
-    <span class="pill {{ 'ok' if sheets_ok else 'bad' }}">
-      Sheets: {{ 'terhubung' if sheets_ok else 'belum terhubung' }}
-    </span>
-  </div>
-</div>
+{% block heading %}Dashboard{% endblock %}
+{% block subheading %}Ringkasan ticket, koneksi WhatsApp, Google Sheets, dan grup{% endblock %}
+
+{% block topbar %}
+<span class="pill {{ 'pill-ok' if waha_status not in ('tidak terhubung','') else 'pill-bad' }}" id="waha-pill">
+  <span class="mi">{{ 'check_circle' if waha_status not in ('tidak terhubung','') else 'cloud_off' }}</span>
+  WAHA: <span id="waha-pill-text">{{ waha_status }}</span>
+</span>
+<span class="pill {{ 'pill-ok' if sheets_ok else 'pill-bad' }}">
+  <span class="mi">{{ 'cloud_done' if sheets_ok else 'cloud_off' }}</span>
+  Sheets: {{ 'terhubung' if sheets_ok else 'belum terhubung' }}
+</span>
 {% endblock %}
 
 {% block content %}
-<div class="stat-grid">
-  <div class="stat">
-    <div class="stat-label">Total Ticket</div>
-    <div class="stat-value">{{ total }}</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Belum Selesai</div>
-    <div class="stat-value warn">{{ open_count }}</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Ticket Hari Ini</div>
-    <div class="stat-value">{{ today_count }}</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Grup Terdaftar</div>
-    <div class="stat-value">{{ groups|length }}</div>
-  </div>
+
+<!-- ============================ STATISTIK ============================ -->
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <a href="/tickets" class="stat-card group block">
+    <div class="flex items-start justify-between">
+      <div>
+        <div class="stat-label">Total Ticket</div>
+        <div class="stat-value">{{ total }}</div>
+      </div>
+      <div class="stat-ico bg-brand-100 text-brand-700"><span class="mi">confirmation_number</span></div>
+    </div>
+    <div class="mt-3 flex items-center gap-1 text-[11px] font-semibold text-brand-600 opacity-0 transition group-hover:opacity-100">
+      Lihat semua ticket <span class="mi">arrow_forward</span>
+    </div>
+  </a>
+
+  <a href="/tickets" class="stat-card group block">
+    <div class="flex items-start justify-between">
+      <div>
+        <div class="stat-label">Belum Selesai</div>
+        <div class="stat-value text-amber-600">{{ open_count }}</div>
+      </div>
+      <div class="stat-ico bg-amber-100 text-amber-700"><span class="mi">pending_actions</span></div>
+    </div>
+    <div class="mt-3 flex items-center gap-1 text-[11px] font-semibold text-brand-600 opacity-0 transition group-hover:opacity-100">
+      Ticket aktif <span class="mi">arrow_forward</span>
+    </div>
+  </a>
+
+  <a href="/tickets" class="stat-card group block">
+    <div class="flex items-start justify-between">
+      <div>
+        <div class="stat-label">Ticket Hari Ini</div>
+        <div class="stat-value text-sky-600">{{ today_count }}</div>
+      </div>
+      <div class="stat-ico bg-sky-100 text-sky-700"><span class="mi">today</span></div>
+    </div>
+    <div class="mt-3 flex items-center gap-1 text-[11px] font-semibold text-brand-600 opacity-0 transition group-hover:opacity-100">
+      Ticket masuk hari ini <span class="mi">arrow_forward</span>
+    </div>
+  </a>
+
+  <a href="/groups" class="stat-card group block">
+    <div class="flex items-start justify-between">
+      <div>
+        <div class="stat-label">Grup Terdaftar</div>
+        <div class="stat-value text-violet-600">{{ groups|length }}</div>
+      </div>
+      <div class="stat-ico bg-violet-100 text-violet-700"><span class="mi">groups</span></div>
+    </div>
+    <div class="mt-3 flex items-center gap-1 text-[11px] font-semibold text-brand-600 opacity-0 transition group-hover:opacity-100">
+      Kelola grup <span class="mi">arrow_forward</span>
+    </div>
+  </a>
 </div>
 
-<section class="card">
-  <div class="card-head">
-    <h2>WhatsApp (WAHA)</h2>
-    <div class="row">
-      <button class="btn primary" type="button" data-action="waha-connect">🔗 Hubungkan Otomatis</button>
-      <button class="btn" type="button" data-action="waha-sync">Sinkronkan sekarang</button>
-      <button class="btn" type="button" data-action="waha-qr">Tampilkan QR</button>
-      <button class="btn" type="button" data-action="waha-restart">Restart session</button>
+<!-- ============================ INTEGRASI ============================ -->
+<div class="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-3">
+
+  <!-- ---------- WhatsApp (WAHA) ---------- -->
+  <section class="integrasi">
+    <div class="integrasi-head">
+      <div class="flex items-center gap-3">
+        <div class="integrasi-ico"><span class="mi">chat</span></div>
+        <div>
+          <h2 class="text-sm font-bold text-slate-900">WhatsApp (WAHA)</h2>
+          <p class="text-[11px] text-slate-500">Koneksi & session pairing</p>
+        </div>
+      </div>
+      <div class="link-status {{ 'ok' if waha_status not in ('tidak terhubung','') else 'bad' }}" id="waha-link-icon" title="Status koneksi WhatsApp">
+        <span class="mi">{{ 'sensors' if waha_status not in ('tidak terhubung','') else 'cloud_off' }}</span>
+      </div>
     </div>
-  </div>
 
-  <p class="muted small" id="waha-out">Koneksi WAHA dikelola otomatis oleh aplikasi:
-  base URL dideteksi, session dibuat bila belum ada, dan webhook didaftarkan
-  ulang bila hilang. Tinggal klik <strong>Hubungkan Otomatis</strong> sekali saja.</p>
+    <ul class="kv-list" id="waha-info">
+      <li>
+        <span>Status session</span>
+        <strong class="flex items-center gap-1.5"><span class="mi text-brand-600">simulate_joystick</span><span id="waha-status">{{ wstate.status or waha_status }}</span></strong>
+      </li>
+      <li>
+        <span>Webhook</span>
+        <strong id="waha-webhook" class="flex items-center gap-1.5">
+          {% if wstate.webhook_ok %}<span class="mi text-emerald-600">check_circle</span> sinkron
+          {% else %}<span class="mi text-amber-600">warning</span> belum sinkron{% endif %}
+        </strong>
+      </li>
+      <li>
+        <span>Terakhir dicek</span>
+        <strong id="waha-checked" class="flex items-center gap-1.5 tabular-nums"><span class="mi text-slate-400">schedule</span>{{ wstate.checked_at or '-' }}</strong>
+      </li>
+      <li>
+        <span>Sinkron otomatis</span>
+        <strong id="waha-auto" class="flex items-center gap-1.5">
+          {% if wstate.auto_sync %}<span class="mi text-emerald-600">autorenew</span> aktif
+          {% else %}<span class="mi text-slate-400">pause</span> nonaktif{% endif %}
+        </strong>
+      </li>
+    </ul>
 
-  <ul class="kv" id="waha-info">
-    <li>Status session: <strong id="waha-status">{{ wstate.status or waha_status }}</strong></li>
-    <li>Webhook: <span id="waha-webhook">{{ '✅ sinkron' if wstate.webhook_ok else '⚠️ belum sinkron' }}</span></li>
-    <li>Terakhir dicek: <span id="waha-checked">{{ wstate.checked_at or '-' }}</span></li>
-    <li>Sinkron otomatis: <span id="waha-auto">{{ 'aktif' if wstate.auto_sync else 'nonaktif' }}</span></li>
-  </ul>
+    <p class="text-xs text-slate-500" id="waha-out">
+      Base URL dideteksi otomatis, session dibuat bila belum ada, dan webhook didaftarkan ulang bila hilang.
+    </p>
+    <p class="action-status" data-status></p>
 
-  <div id="qr-box" class="qr-box"></div>
+    <div id="qr-box" class="empty:hidden"></div>
 
-  <details class="muted small">
-    <summary>Detail lanjutan (URL webhook, bersihkan webhook lama)</summary>
-    <div class="row mt">
-      <input type="text" id="webhook-url" readonly value="{{ webhook_url }}">
-      <button class="btn" type="button" id="copy-webhook">Salin URL webhook</button>
-      <button class="btn" type="button" data-action="waha-webhook-clean">Bersihkan webhook lama</button>
+    <div class="integrasi-actions">
+      <button class="btn btn-primary" type="button" data-action="waha-connect">
+        <span class="mi">link</span> Hubungkan Otomatis
+      </button>
+      <button class="btn" type="button" data-action="waha-sync">
+        <span class="mi">sync</span> Sinkronkan
+      </button>
+      <button class="btn" type="button" data-action="waha-qr">
+        <span class="mi">qr_code_2</span> QR
+      </button>
+      <button class="btn btn-danger" type="button" data-action="waha-restart">
+        <span class="mi">restart_alt</span> Restart
+      </button>
     </div>
-    <p>URL di atas otomatis didaftarkan ke WAHA oleh aplikasi. Jangan pakai
-    <code>127.0.0.1</code>/<code>localhost</code> — dari container WAHA itu
-    menunjuk ke dirinya sendiri.</p>
-  </details>
-</section>
 
-<section class="card">
-  <div class="card-head">
-    <h2>Google Sheets</h2>
-    <div class="row">
-      <button class="btn" type="button" data-action="sheets-test">Tes koneksi</button>
-      <button class="btn" type="button" data-action="sheets-sync">Sinkron semua ticket</button>
-      <a class="btn ghost" href="/settings">Pengaturan</a>
-    </div>
-  </div>
-  <p class="muted small" id="sheets-out">{% if sheets_ok %}Terhubung. Tab ticket/log/ringkasan dibuat otomatis saat sinkron pertama.{% else %}{{ sheets_error or 'Belum terhubung - service account belum lengkap (lihat Pengaturan → Google Sheets).' }}{% endif %}</p>
-</section>
-
-<div class="grid-2">
-  <section class="card">
-    <h2>Ticket per Status</h2>
-    <table class="table">
-      <thead><tr><th>Status</th><th class="right">Jumlah</th></tr></thead>
-      <tbody>
-      {% for st in statuses %}
-        <tr>
-          <td>
-            <span class="badge" style="background:{{ st.color }};color:{{ st.text_color }}">{{ st.label }}</span>
-          </td>
-          <td class="right"><strong>{{ counts.get(st.key, 0) }}</strong></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <details class="acc">
+      <summary>
+        <span class="flex items-center gap-2"><span class="mi">tune</span> Detail lanjutan</span>
+        <span class="mi">expand_more</span>
+      </summary>
+      <div class="acc-body">
+        <div class="flex flex-wrap items-center gap-2">
+          <input type="text" id="webhook-url" readonly value="{{ webhook_url }}"
+                 class="input mt-0 flex-1 font-mono text-xs">
+          <button class="btn" type="button" id="copy-webhook">
+            <span class="mi">content_copy</span> Salin
+          </button>
+          <button class="btn btn-danger" type="button" data-action="waha-webhook-clean">
+            <span class="mi">delete_sweep</span> Bersihkan webhook lama
+          </button>
+        </div>
+        <p class="hint">
+          URL di atas otomatis didaftarkan ke WAHA oleh aplikasi. Jangan pakai
+          <code>127.0.0.1</code>/<code>localhost</code> — dari container WAHA itu menunjuk ke dirinya sendiri.
+        </p>
+      </div>
+    </details>
   </section>
 
-  <section class="card">
-    <h2>Grup WhatsApp</h2>
+  <!-- ---------- Google Sheets ---------- -->
+  <section class="integrasi">
+    <div class="integrasi-head">
+      <div class="flex items-center gap-3">
+        <div class="integrasi-ico !bg-sky-100 !text-sky-700"><span class="mi">table_view</span></div>
+        <div>
+          <h2 class="text-sm font-bold text-slate-900">Google Sheets</h2>
+          <p class="text-[11px] text-slate-500">Sinkron ticket &amp; laporan</p>
+        </div>
+      </div>
+      <div class="link-status {{ 'ok' if sheets_ok else 'bad' }}" title="Status koneksi Google Sheets">
+        <span class="mi">{{ 'cloud_done' if sheets_ok else 'cloud_off' }}</span>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+      <div class="flex items-center gap-2">
+        <span class="mi {{ 'text-emerald-600' if sheets_ok else 'text-red-500' }}">{{ 'check_circle' if sheets_ok else 'error' }}</span>
+        <span class="text-sm font-semibold text-slate-800">
+          {{ 'Sudah terhubung' if sheets_ok else 'Belum terhubung' }}
+        </span>
+      </div>
+      <p class="mt-1 text-[11px] leading-relaxed text-slate-500" id="sheets-out">
+        {% if sheets_ok %}Tab ticket dibuat otomatis saat sinkron pertama.
+        {% else %}{{ sheets_error or 'Service account belum lengkap (lihat Pengaturan → Google Sheets).' }}{% endif %}
+      </p>
+    </div>
+
+    <p class="action-status" data-status></p>
+
+    <div class="integrasi-actions">
+      <button class="btn" type="button" data-action="sheets-test">
+        <span class="mi">network_check</span> Tes koneksi
+      </button>
+      <button class="btn btn-primary" type="button" data-action="sheets-sync">
+        <span class="mi">cloud_upload</span> Sinkron semua ticket
+      </button>
+      <a class="btn btn-ghost" href="/settings">
+        <span class="mi">settings</span> Pengaturan
+      </a>
+    </div>
+  </section>
+
+  <!-- ---------- Grup WhatsApp ---------- -->
+  <section class="integrasi">
+    <div class="integrasi-head">
+      <div class="flex items-center gap-3">
+        <div class="integrasi-ico !bg-violet-100 !text-violet-700"><span class="mi">groups</span></div>
+        <div>
+          <h2 class="text-sm font-bold text-slate-900">Grup WhatsApp</h2>
+          <p class="text-[11px] text-slate-500">{{ groups|length }} grup terdaftar</p>
+        </div>
+      </div>
+      <div class="link-status idle" title="Jumlah grup aktif">
+        <span class="mi">group</span>
+      </div>
+    </div>
+
     {% if groups %}
-    <table class="table">
-      <thead><tr><th>Grup</th><th>Status</th><th>Ringkasan</th></tr></thead>
-      <tbody>
-      {% for g in groups %}
-        <tr>
-          <td>{{ g.chat_name or g.chat_id }}<div class="muted small">{{ g.chat_id }}</div></td>
-          <td>{% if g.enabled %}<span class="badge" style="background:#bbf7d0;color:#14532d">aktif</span>{% else %}<span class="badge" style="background:#fecaca;color:#7f1d1d">nonaktif</span>{% endif %}</td>
-          <td><a class="link" href="/groups">Atur</a></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+      <ul class="kv-list">
+        {% for g in groups %}
+          <li>
+            <span class="flex min-w-0 items-center gap-2">
+              <span class="mi text-slate-400">forum</span>
+              <span class="truncate">{{ g.chat_name or '(tanpa nama)' }}</span>
+            </span>
+            <span class="flex items-center gap-2">
+              <span class="badge {{ 'pill-ok' if g.enabled else 'pill-bad' }}">
+                <span class="mi">{{ 'toggle_on' if g.enabled else 'toggle_off' }}</span>
+                {{ 'aktif' if g.enabled else 'nonaktif' }}
+              </span>
+              <a class="btn btn-ghost btn-sm" href="/groups"><span class="mi">edit</span>Atur</a>
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
     {% else %}
-      <p class="muted">Belum ada grup terdaftar. Grup akan otomatis terdaftar saat
-      bot menerima pesan di grup tersebut.</p>
+      <div class="rounded-xl border border-dashed border-slate-300 p-4 text-center">
+        <span class="mi text-2xl text-slate-400">group_add</span>
+        <p class="mt-1 text-xs text-slate-500">Belum ada grup terdaftar. Grup muncul otomatis saat bot menerima pesan.</p>
+      </div>
     {% endif %}
+
+    <div class="integrasi-actions">
+      <a class="btn" href="/groups"><span class="mi">groups</span> Kelola grup</a>
+      <a class="btn btn-ghost" href="/logs"><span class="mi">history</span> Lihat log pesan</a>
+    </div>
   </section>
 </div>
 
-<section class="card">
-  <div class="card-head">
-    <h2>Ticket Terbaru</h2>
-    <a class="btn ghost" href="/tickets">Lihat semua</a>
-  </div>
-  <table class="table">
-    <thead><tr><th>ID</th><th>Issue</th><th>Status</th><th>PIC</th><th>Pelapor</th><th>Dibuat</th></tr></thead>
-    <tbody>
-    {% for t in recent %}
-      <tr>
-        <td><a class="link mono" href="/tickets/{{ t.ticket_id }}">{{ t.ticket_id }}</a></td>
-        <td>{{ t.detail or t.title or '-' }}</td>
-        <td><span class="badge">{{ t.status }}</span></td>
-        <td>{{ t.pic or '-' }}</td>
-        <td>{{ t.reporter or '-' }}</td>
-        <td class="muted small">{{ t.created_at|local_datetime('%d-%m %H:%M') }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="6" class="muted">Belum ada ticket.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</section>
+<!-- ============================ DISTRIBUSI & TICKET TERBARU ============================ -->
+<div class="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-5">
+  <section class="card xl:col-span-2">
+    <div class="card-head">
+      <h2 class="card-title"><span class="mi">donut_small</span> Ticket per Status</h2>
+      <a href="/tickets" class="btn btn-ghost btn-sm">Semua <span class="mi">arrow_forward</span></a>
+    </div>
+
+    {% set max_count = counts.values()|max if counts else 0 %}
+    <ul class="space-y-3">
+      {% for st in statuses %}
+        {% set c = counts.get(st.key, 0) %}
+        <li>
+          <div class="mb-1.5 flex items-center justify-between gap-3">
+            <span class="inline-flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-full" style="background:{{ st.color }}"></span>
+              <span class="text-sm font-semibold text-slate-700">{{ st.label }}</span>
+            </span>
+            <span class="text-sm font-bold tabular-nums text-slate-900">{{ c }}</span>
+          </div>
+          <div class="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div class="h-full rounded-full transition-all duration-700"
+                 style="width: {{ (100 * c / max_count) if max_count else 0 }}%; background:{{ st.color }}"></div>
+          </div>
+        </li>
+      {% else %}
+        <li class="text-sm text-slate-500">Belum ada status terdaftar.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="card xl:col-span-3">
+    <div class="card-head">
+      <h2 class="card-title"><span class="mi">history</span> Ticket Terbaru</h2>
+      <a href="/tickets" class="btn btn-ghost btn-sm">Lihat semua <span class="mi">arrow_forward</span></a>
+    </div>
+    <div class="tbl-scroll">
+      <table class="tbl">
+        <thead>
+          <tr><th>ID</th><th>Issue</th><th>Status</th><th>PIC</th><th>Pelapor</th><th>Dibuat</th></tr>
+        </thead>
+        <tbody>
+        {% for t in recent %}
+          <tr>
+            <td>
+              {% if t.media_attachments %}
+                <a href="/tickets/{{ t.ticket_id }}" class="font-mono text-xs font-bold text-brand-700 hover:underline"
+                   data-gallery='{{ gallery_items(t.media_attachments) }}'
+                   data-gallery-title="{{ t.ticket_id }}"
+                   data-gallery-detail="/tickets/{{ t.ticket_id }}"
+                   title="Buka galeri foto {{ t.ticket_id }}">
+                  {{ t.ticket_id }} <span class="mi align-middle text-[13px]">photo_library</span>
+                </a>
+              {% else %}
+                <a href="/tickets/{{ t.ticket_id }}" class="font-mono text-xs font-bold text-brand-700 hover:underline">{{ t.ticket_id }}</a>
+              {% endif %}
+            </td>
+            <td class="max-w-[240px] truncate" title="{{ t.detail or t.title }}">{{ t.detail or t.title or '-' }}</td>
+            <td><span class="badge">{{ t.status }}</span></td>
+            <td>{{ t.pic or '-' }}</td>
+            <td class="text-slate-600">{{ t.reporter or '-' }}</td>
+            <td class="whitespace-nowrap text-[11px] text-slate-500">{{ t.created_at|local_datetime('%d-%m %H:%M') }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="py-6 text-center text-slate-500">Belum ada ticket.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
 {% endblock %}

@@ -24,8 +24,9 @@ WAHA (self-hosted, Docker)  ──webhook──►  Aplikasi FastAPI
 | Audit pesan | Semua pesan di grup tersimpan (bisa dimatikan) |
 | Ticket otomatis | `#ticket <issue>` membuat ticket bernomor (mis. `tkt1120261`) |
 | Handling ticket | Status: Belum Dikerjakan → Dikerjakan → Selesai / Dibatalkan, dengan aturan transisi |
-| `#info` | Ringkasan ticket hari ini untuk penanya: belum selesai & sudah selesai |
+| `#info` | Ringkasan ticket: semua yang belum selesai + yang selesai hari ini |
 | Ringkasan harian | Otomatis dikirim ke grup pada jam tertentu |
+| Format balasan | Ikon status, ID tebal, dan ringkasan dengan jumlah tiket di bagian atas |
 | Dashboard | Konfigurasi perintah, status, grup, WAHA, Google Sheets |
 | Google Sheets | Service account, sinkron otomatis ke satu tab `TICKETS` |
 | Multi-grup | Grup bisa diaktifkan/dimatikan, prefix & jadwal per grup |
@@ -35,13 +36,17 @@ pertama. Foto berikutnya dari pengirim dan chat yang sama akan ikut dilampirkan
 selama diterima dalam 30 detik. Foto-foto tersebut tampil bersama di detail
 ticket dan thumbnail daftar ticket.
 
+Webhook untuk pesan yang sama tidak diproses ulang: aplikasi menyimpan ID pesan
+yang actionable secara unik per session WhatsApp dan chat, sehingga retry webhook
+tidak membuat ticket atau lampiran ganda.
+
 Balasan pembuatan ticket hanya berisi ID (mis. `tkt1120261`). Pesan tanpa
 perintah/prefix terdaftar diabaikan dan tidak dicatat. Balasan tidak menyebut
 ID pengirim; jeda minimum tetap 2 detik dipakai antarbalasan agar tidak terjadi
 pengiriman beruntun.
 
 Teknisi juga dapat membalas (reply/quote) pesan bot yang berisi ID ticket
-dengan `progress`, `done`, atau status yang dikenal (mis. `MENUNGGU`). Bot
+dengan `progress`, `done`, `#done`, atau status yang dikenal (mis. `MENUNGGU`). Bot
 mengubah status ticket yang dikutip; catatan setelah status, mis.
 `done AC sudah diperbaiki`, disimpan sebagai resolusi. Reply harus berasal
 dari chat ticket yang sama dan tetap mengikuti aturan transisi status.
@@ -69,9 +74,10 @@ docker compose logs -f app
 - WAHA: <http://localhost:3000> (login: `BOT_WAHA_ADMIN_USER` / `BOT_WAHA_ADMIN_PASSWORD`)
   → menu **Sessions** → create/start session `engineering` → scan QR WhatsApp
 
-> **WAHA terbaru mewajibkan API key.** `BOT_WAHA_API_KEY` dipakai dua service
-> (WAHA sebagai `WHATSAPP_API_KEY`, aplikasi sebagai header `X-Api-Key`).
-> Isi dengan nilai acak sebelum deploy.
+> `BOT_WAHA_API_KEY` dipakai dua service (WAHA sebagai `WHATSAPP_API_KEY`,
+> aplikasi sebagai header `X-Api-Key`). Dashboard WAHA memakai pasangan
+> `BOT_WAHA_ADMIN_USER` / `BOT_WAHA_ADMIN_PASSWORD`; Swagger tidak memakai
+> password dashboard, tetapi API key tersebut.
 
 ### 2.2 Lokal (tanpa Docker)
 
@@ -94,9 +100,14 @@ untuk membuat session atau mendaftarkan webhook.
 
 ### Cara tercepat
 
-1. Pastikan `BOT_WAHA_API_KEY` di `.env` sama dengan `WHATSAPP_API_KEY` WAHA.
+1. Isi `BOT_WAHA_API_KEY`, `BOT_WAHA_ADMIN_USER`, dan
+   `BOT_WAHA_ADMIN_PASSWORD` di `.env` dengan nilai yang kuat dan unik.
+   Docker Compose akan menolak konfigurasi bila salah satunya kosong.
 2. Jalankan `docker compose up -d --build`.
-3. Buka dashboard <http://localhost:8080> → kartu **WhatsApp (WAHA)** → klik
+3. Dashboard WAHA di <http://localhost:3000> memakai username/password dari
+   `.env`. Swagger (`/docs`) memakai API key `BOT_WAHA_API_KEY` melalui tombol
+   **Authorize** / header `X-Api-Key`.
+4. Buka dashboard bot <http://localhost:8080> → kartu **WhatsApp (WAHA)** → klik
    **🔗 Hubungkan Otomatis**.
 
 Selesai. Aplikasi otomatis:
@@ -168,12 +179,14 @@ langsung tercatat (terlihat di dashboard).
 |---|---|---|
 | `#ticket` / `#buat` | `#ticket AC kamar 203 tidak dingin` | Buat ticket baru |
 | `#status` / `#st` | `#status tkt1120261` | Lihat detail ticket |
-| `#status` + status | `#status tkt1120261 DIKERJAKAN` | Ubah status |
+| `#detail` | `#detail tkt1120261` | Tampilkan detail ticket dan kirim semua foto lampiran |
+| `#status` + status | `#status tkt1120261 DIKERJAKAN AC sedang diperbaiki` | Ubah status dan simpan catatan pengerjaan |
 | `#pic` | `#pic tkt1120261 Budi` | Tentukan PIC |
 | `#tutup` / `#selesai` | `#tutup tkt1120261 Kompresor diganti` | Tutup ticket (SELESAI) |
 | `#batal` | `#batal tkt1120261 Tamu pindah` | Batalkan ticket |
-| `#list` / `#daftar` | `#list DIKERJAKAN` | Daftar ticket terbaru |
-| `#info` / `#resume` / `#ringkasan` | `#info` | Ringkasan hari ini (belum selesai & selesai) |
+| `#list` / `#daftar` | `#list`, `#list SELESAI`, atau `#list SEMUA` | Default menampilkan ticket belum selesai; `SEMUA` menampilkan semua status |
+| `#ingatkan` / `#reminder` | `#ingatkan tkt1120261 besok 09:00` | Reminder harian mulai besok, berulang sampai ticket ditutup/dibatalkan |
+| `#info` / `#resume` / `#ringkasan` | `#info` | Semua ticket belum selesai + ticket selesai hari ini |
 | `#bantuan` / `#help` | `#bantuan` | Daftar perintah |
 | `#foto` / `#photo` | `#foto tkt1120261` | Lampirkan foto ke ticket |
 
@@ -181,6 +194,12 @@ Tambahan:
 - Seluruh teks setelah `#ticket` disimpan langsung sebagai `Issue`, termasuk jika memuat `|`
 - Prioritas tinggi: awali dengan `[tinggi]`
 - Mention sebagai PIC: `#ticket Ganti filter @Budi` (mention dipisahkan dari Issue)
+- `#ingatkan <ID>` melihat jadwal reminder; `#ingatkan <ID> batal` membatalkannya. Waktu memakai zona waktu bot.
+- Penghapusan satu ticket tersedia pada daftar ticket; foto dan log lokal yang terkait ikut dihapus, tetapi Google Sheets tidak diubah.
+- Ringkasan `#info` dan ringkasan harian (grup) memakai logika yang sama:
+  - **Belum selesai** = seluruh ticket yang masih berjalan, berapa pun umurnya.
+  - **Sudah selesai / ditutup hari ini** = ticket yang ditutup hari ini saja (bukan seluruh ticket selesai).
+  - Jumlah total/status diletakkan di atas daftar. `#info semua` menampilkan ticket selesai kapan pun.
 
 Semua perintah **bisa diedit dari dashboard** (nama, alias, aksi, format, status, dan
 transisinya) — perubahan langsung dipakai bot tanpa restart.
@@ -194,7 +213,7 @@ BARU ──► DIKERJAKAN ──► SELESAI
   └──► DIBATALKAN
 ```
 
-Status bertanda "masih dikerjakan" = kategori **belum selesai** pada ringkasan `#info`.
+Status bertanda "masih dikerjakan" = kategori **belum selesai** pada ringkasan `#info` (semua ticket yang masih berjalan, bukan hanya ticket yang dibuat hari ini).
 
 ---
 
@@ -226,7 +245,9 @@ media pada tabel `tickets` tetap menyimpan foto pertama untuk kompatibilitas
 dengan integrasi lama.
 
 Semua foto ticket ditampilkan di halaman detail ticket dashboard
-(`/tickets/<ID>`), yang memerlukan login. Foto tidak ditulis ke Google Sheets.
+(`/tickets/<ID>`), yang memerlukan login. Foto utama ticket juga ditampilkan
+langsung di kolom `Foto` pada Google Sheets; kolom `Link Foto` menyediakan
+tautan cadangan.
 
 > Catatan: kolom-kolom media & perbaikan ejaan status lama dijalankan otomatis
 > oleh migrasi saat aplikasi start (`app/migrate.py`). Migrasi aman diulang.
@@ -243,12 +264,15 @@ Semua foto ticket ditampilkan di halaman detail ticket dashboard
 4. Di dashboard → **Pengaturan → Google Sheets**: isi Spreadsheet ID dan path
    service account (atau paste JSON). Ticket disinkronkan hanya ke tab `TICKETS`
    dengan kolom `ID`, `Tanggal`, `Issue`, `Status`, `PIC`, `Pelapor`, `Nomor HP`,
-   `Grup`, `Selesai`, dan `Keterangan`.
+   `Grup`, `Selesai`, `Keterangan`, `Foto`, dan `Link Foto`.
 5. Klik **Tes koneksi**, lalu **Sinkron semua ticket**.
 
 Tab dibuat otomatis saat pertama kali sinkron. Database lokal (SQLite) adalah sumber
-kebenaran; ticket baru ditambahkan di bagian bawah. Log, ringkasan, judul, dan
-foto tidak disinkronkan ke Sheets.
+kebenaran; ticket baru ditambahkan di bagian bawah. Foto utama ditampilkan di
+dalam sel `Foto` dengan formula `IMAGE()`; URL bertanda tangan tetap tersedia
+di kolom `Link Foto`. Untuk mengambil gambar, server Google harus dapat
+mengakses alamat publik pada **Pengaturan → URL publik foto**. Sinkron ulang
+akan mengisi foto untuk ticket yang sudah ada.
 
 > **Spreadsheet ID** juga bisa lewat `.env` (`BOT_SPREADSHEET_ID`).
 > Error `403`/`PermissionDenied` → spreadsheet belum dibagikan ke email service
@@ -264,13 +288,57 @@ foto tidak disinkronkan ke Sheets.
 
 ## 7. Dashboard
 
+Dashboard memakai **Tailwind CSS 3** (Jinja + Tailwind, tanpa SPA), **tema light**,
+dengan ikon **Material Symbols Rounded**.
+
 | Halaman | Isi |
 |---|---|
-| Dashboard | Statistik, ticket per status, grup, status koneksi WAHA & Sheets (auto-refresh 10 detik) |
-| Tickets | Cari/filter, detail ticket, ubah status & PIC, riwayat perintah, hapus seluruh ticket lokal dengan konfirmasi |
+| Dashboard | 4 kartu statistik interaktif, 3 kartu integrasi (WhatsApp/WAHA, Google Sheets, Grup) yang semuanya terlihat & bisa diklik langsung, ticket per status (bar progress), ticket terbaru (auto-refresh 10 detik) |
+| Tickets | Cari & filter (instant search di browser), filter cepat per status, **klik ID ticket langsung membuka galeri foto**, ubah status & PIC, atur/batalkan reminder harian tiap ticket yang belum selesai, riwayat perintah, hapus seluruh ticket lokal dengan konfirmasi |
 | Grup | Aktif/nonaktifkan grup, prefix per grup, ringkasan harian per grup |
-| Log | Semua pesan masuk + hasil balasan bot |
-| Pengaturan | Prefix, daftar perintah, status & transisi, WAHA, Sheets, jadwal ringkasan |
+| Log | Semua pesan masuk + hasil balasan bot, auto-refresh opsional |
+| Pengaturan | Prefix, daftar perintah, status & transisi, WAHA, Sheets, jadwal ringkasan — tiap bagian dalam tab, perubahan checklist tersimpan per baris, save bar menempel di bawah |
+
+Fitur tampilan:
+
+- **Tema terang** (light only — tidak ada mode gelap).
+- **Ikon Material Symbols Rounded**, di-*self-host* di `static/fonts/` (tidak butuh
+  internet/CDN). Nama ikon ditulis sebagai teks ligatur:
+  `<span class="mi">settings</span>` (varian filled: `class="mi mi-fill"`).
+- **Galeri foto**: klik ID ticket (atau thumbnail) langsung membuka galeri full-screen
+  dengan thumbnail strip, navigasi panah kiri/kanan keyboard, tombol unduh & "Detail ticket".
+- **Ikon status koneksi**: WAHA (`sensors`/`cloud_off`) dan Google Sheets
+  (`cloud_done`/`cloud_off`) memakai kotak ikon berwarna di kartu integrasi.
+- **Toast notifikasi** untuk hasil setiap aksi (koneksi WAHA, sinkron Sheets, copy URL).
+- **Umpan balik di tempat klik**: setiap tombol aksi menampilkan spinner + status
+  (hijau = sukses, merah = gagal) tepat di bawah bagian yang diklik.
+- **Pengaturan**: badge "Perubahan belum disimpan", tombol **Buang perubahan**,
+  **Ctrl+S** untuk simpan, peringatan URL publik tampil langsung saat diisi,
+  dan kartu status live (session WAHA / webhook / Sheets) yang diperbarui tiap 10 detik.
+- **QR pairing** ditampilkan dalam modal, bukan memanjang halaman.
+- Sidebar bisa dibuka/tutup di layar kecil.
+
+### 7.1 Mengubah tampilan (Tailwind)
+
+```bash
+npm install          # sekali saja
+npm run build:css    # build static/tailwind.css (minified)
+npm run watch:css    # mode watch saat developing
+```
+
+- Sumber gaya: `static/src/tailwind.css` (komponen: `.card`, `.btn`, `.tbl`, `.pill`, ...).
+- Konfigurasi: `tailwind.config.js` (warna brand, font, animasi).
+- Konten yang dipindai: `templates/**/*.html` dan `static/app.js`.
+- `static/tailwind.css` ikut di-commit agar aplikasi tetap jalan tanpa Node.js.
+
+> **Setelah mengubah template atau `static/src/tailwind.css`, jalankan
+> `npm run build:css`** sebelum build ulang Docker. Image Docker juga membangun
+> Tailwind sendiri di stage `css`; kalau build itu gagal, CSS lama dipakai.
+
+> **Ikon baru** harus ada di subset font. Kalau ikon tampil sebagai teks (mis.
+> "settings"), berarti nama ikon belum ada di subset — regenerate subset dari
+> Google Fonts (`family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=...`)
+> lalu ganti `static/fonts/MaterialSymbolsRounded.woff2`.
 
 Login dashboard: set `BOT_DASHBOARD_PASSWORD` di `.env` (kosong = terbuka, untuk lokal saja).
 Penghapusan seluruh ticket dari halaman Tickets menghapus ticket lokal, lampiran,
@@ -345,4 +413,11 @@ app/
 ├─ sheets.py          # klien Google Sheets
 ├─ scheduler.py       # APScheduler
 └─ routers/           # dashboard (web.py) + webhook.py
+templates/            # halaman Jinja (base + dashboard/tickets/groups/logs/settings)
+static/
+├─ src/tailwind.css   # sumber gaya Tailwind (komponen)
+├─ tailwind.css       # hasil build (di-commit, dilayani ke browser)
+├─ app.js             # interaksi dashboard (tab, toast, modal, pencarian, tema)
+tailwind.config.js    # konfigurasi Tailwind (warna brand, font, animasi)
+package.json          # skrip build/watch CSS
 ```

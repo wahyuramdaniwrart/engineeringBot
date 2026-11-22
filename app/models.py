@@ -71,6 +71,17 @@ class Ticket(Base):
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Reminder harian (reminder_at adalah pengiriman berikutnya, UTC).
+    reminder_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reminder_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reminder_last_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Sinkronisasi Google Sheets
     sheet_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sheet_synced_at: Mapped[datetime | None] = mapped_column(
@@ -139,6 +150,23 @@ class MessageLog(Base):
     result: Mapped[str] = mapped_column(String(255), default="")
     ticket_ref: Mapped[str] = mapped_column(String(32), default="")
     raw: Mapped[str] = mapped_column(Text, default="")
+
+
+class ProcessedInboundMessage(Base):
+    """ID pesan masuk yang sudah diklaim untuk mencegah pemrosesan ganda."""
+
+    __tablename__ = "processed_inbound_messages"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_name", "chat_id", "message_id", name="uq_processed_inbound_message"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_name: Mapped[str] = mapped_column(String(64), default="default")
+    chat_id: Mapped[str] = mapped_column(String(128))
+    message_id: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class GroupConfig(Base):

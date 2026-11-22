@@ -15,6 +15,7 @@ log = logging.getLogger("scheduler")
 _scheduler: BackgroundScheduler | None = None
 _daily_job_id = "daily-summary"
 _waha_job_id = "waha-auto-sync"
+_ticket_reminders_job_id = "ticket-reminders"
 
 
 def _tz() -> str:
@@ -29,6 +30,7 @@ def start() -> BackgroundScheduler:
         log.info("Scheduler dijalankan (timezone=%s)", _tz())
     reschedule_daily()
     reschedule_waha_sync()
+    reschedule_ticket_reminders()
     return _scheduler
 
 
@@ -81,6 +83,25 @@ def reschedule_waha_sync() -> None:
     log.info("Sinkron otomatis WAHA dijadwalkan tiap %d detik", seconds)
 
 
+def reschedule_ticket_reminders() -> None:
+    """Periksa reminder yang tersimpan di database setiap menit."""
+    if _scheduler is None:
+        return
+    try:
+        _scheduler.remove_job(_ticket_reminders_job_id)
+    except Exception:
+        pass
+    _scheduler.add_job(
+        run_ticket_reminders,
+        IntervalTrigger(seconds=60),
+        id=_ticket_reminders_job_id,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    log.info("Pemeriksaan reminder ticket dijadwalkan tiap 60 detik")
+
+
 def run_waha_sync() -> None:
     """Satu siklus sinkron WAHA: cek status, heal webhook, buat session bila perlu."""
     from .waha_link import auto_connect, refresh_status, sync_webhook
@@ -107,6 +128,15 @@ def run_daily_summary() -> None:
         send_daily_summary()
     except Exception as exc:  # pragma: no cover
         log.exception("Gagal menjalankan ringkasan harian: %s", exc)
+
+
+def run_ticket_reminders() -> None:
+    from .reminders import run_due_reminders
+
+    try:
+        run_due_reminders()
+    except Exception as exc:  # pragma: no cover - job tidak boleh mematikan scheduler
+        log.exception("Gagal menjalankan reminder ticket: %s", exc)
 
 
 def run_sheets_sync() -> None:

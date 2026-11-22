@@ -118,7 +118,7 @@ async def waha_webhook(
             log.info("Status session WAHA: %s (%s)", status, session_name or "-")
         return {"ok": True, "handled": True, "event": event, "status": status}
 
-    msg = parse_waha_payload(payload)
+    msg = parse_waha_payload(payload, session_name=session_name or session)
     if msg is None:
         return {"ok": True, "handled": False}
 

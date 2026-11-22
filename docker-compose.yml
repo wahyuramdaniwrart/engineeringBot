@@ -17,11 +17,11 @@ services:
       - WHATSAPP_SESSION=engineering
       - WHATSAPP_SESSION_FOLDER=/waha/sessions
       - WHATSAPP_FILES_FOLDER=/waha/media
-      # WAHA terbaru mewajibkan API key. Nilai sama dengan BOT_WAHA_API_KEY.
-      - WHATSAPP_API_KEY=${BOT_WAHA_API_KEY:-waha-local-key}
+      # Required: protects WAHA API endpoints, including requests from Swagger.
+      - WHATSAPP_API_KEY=${BOT_WAHA_API_KEY:?Set BOT_WAHA_API_KEY in .env}
       # Login dashboard WAHA (http://localhost:3000)
-      - WHATSAPP_ADMIN_USERNAME=${BOT_WAHA_ADMIN_USER:-admin}
-      - WHATSAPP_ADMIN_PASSWORD=${BOT_WAHA_ADMIN_PASSWORD:-waha-admin}
+      - WHATSAPP_ADMIN_USERNAME=${BOT_WAHA_ADMIN_USER:?Set BOT_WAHA_ADMIN_USER in .env}
+      - WHATSAPP_ADMIN_PASSWORD=${BOT_WAHA_ADMIN_PASSWORD:?Set BOT_WAHA_ADMIN_PASSWORD in .env}
     volumes:
       - ./data/waha:/waha/media
       - ./data/waha/sessions:/waha/sessions
@@ -29,7 +29,7 @@ services:
     # sehingga halaman WhatsApp Web gagal ter-render & injeksi whatsapp-web.js timeout.
     shm_size: "1gb"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --header=\"X-Api-Key: ${BOT_WAHA_API_KEY:-waha-local-key}\" --spider http://127.0.0.1:3000/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --header=\"X-Api-Key: ${BOT_WAHA_API_KEY:?Set BOT_WAHA_API_KEY in .env}\" --spider http://127.0.0.1:3000/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -50,8 +50,8 @@ services:
     env_file:
       - .env
     environment:
-      # WAHA terbaru mewajibkan API key. Nilai yang sama dipakai kedua service.
-      - BOT_WAHA_API_KEY=${BOT_WAHA_API_KEY:-waha-local-key}
+      # The same required key is used by WAHA and the bot.
+      - BOT_WAHA_API_KEY=${BOT_WAHA_API_KEY:?Set BOT_WAHA_API_KEY in .env}
       # Database harus di volume persisten, bukan di dalam container.
       - BOT_DATA_DIR=/data
       # URL aplikasi yang dipanggil WAHA saat mengirim webhook.

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from itertools import count
 from pathlib import Path
+from time import sleep
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +29,7 @@ PNG = (
     b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
     b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+_TEXT_MESSAGE_IDS = count(1)
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +86,7 @@ def _photo_payload(body: str = "", chat_id: str = "12036@g.us") -> dict:
 
 def _text_payload(body: str, chat_id: str = "12036@g.us") -> dict:
     return {
-        "id": "msg-text-1",
+        "id": f"msg-text-{next(_TEXT_MESSAGE_IDS)}",
         "chatId": chat_id,
         "chatName": "Unit Test",
         "from": "628123456789",
@@ -185,6 +189,53 @@ def test_photo_with_command_creates_ticket_with_photo(monkeypatch, tmp_path):
     files = list((tmp_path / "media").rglob("*.jpg"))
     assert len(files) == 1
     assert files[0].read_bytes() == PNG
+
+
+def test_replayed_photo_command_creates_only_one_ticket_and_download(monkeypatch):
+    fake = FakeWaha()
+    monkeypatch.setattr("app.handlers.get_waha", lambda: fake)
+    msg = parse_waha_payload(_photo_payload("#ticket AC kamar 203 tidak dingin"))
+
+    with session_scope() as s:
+        first_reply = handle_inbound(s, msg)
+    with session_scope() as s:
+        second_reply = handle_inbound(s, msg)
+
+    assert first_reply.startswith("tkt")
+    assert second_reply == ""
+    assert len(fake.calls) == 1
+    with session_scope() as s:
+        from app.store import list_tickets
+
+        tickets = list_tickets(s)
+        assert len(tickets) == 1
+        assert len(tickets[0].media_attachments) == 1
+
+
+def test_concurrent_replayed_photo_command_creates_only_one_ticket(monkeypatch):
+    class SlowWaha(FakeWaha):
+        def download_media(self, url: str, max_bytes: int = 0):
+            sleep(0.1)
+            return super().download_media(url, max_bytes)
+
+    fake = SlowWaha()
+    monkeypatch.setattr("app.handlers.get_waha", lambda: fake)
+    msg = parse_waha_payload(_photo_payload("#ticket AC kamar 203 tidak dingin"))
+
+    def process_message(_):
+        with session_scope() as s:
+            return handle_inbound(s, msg)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        replies = list(executor.map(process_message, range(2)))
+
+    assert sum(reply.startswith("tkt") for reply in replies) == 1
+    assert sum(not reply for reply in replies) == 1
+    assert len(fake.calls) == 1
+    with session_scope() as s:
+        from app.store import list_tickets
+
+        assert len(list_tickets(s)) == 1
 
 
 def test_multiple_photos_are_saved_and_shown_in_ticket(monkeypatch):
@@ -366,6 +417,79 @@ def test_external_media_url_is_not_rewritten():
     assert resolved.startswith("https://mmg.whatsapp.net/")
 
 
+def test_send_image_uses_global_waha_endpoint_and_file_metadata(monkeypatch):
+    from app.waha import WahaClient
+
+    client = WahaClient(base_url="http://waha:3000", api_key="k", session="engineering")
+    calls = []
+
+    def fake_request(method, path, body=None):
+        calls.append((method, path, body))
+        return {"id": "image-message"}
+
+    monkeypatch.setattr(client, "request", fake_request)
+    result = client.send_image(
+        "12036@g.us",
+        "http://app:8080/media/foto.jpg?t=signature",
+        caption="Foto ticket",
+        mimetype="image/jpeg",
+        filename="foto.jpg",
+    )
+
+    assert result == {"id": "image-message"}
+    assert calls == [
+        (
+            "POST",
+            "/api/sendImage",
+            {
+                "session": "engineering",
+                "chatId": "12036@g.us",
+                "file": {
+                    "url": "http://app:8080/media/foto.jpg?t=signature",
+                    "mimetype": "image/jpeg",
+                    "filename": "foto.jpg",
+                },
+                "caption": "Foto ticket",
+            },
+        )
+    ]
+
+
+def test_send_file_uses_global_waha_endpoint(monkeypatch):
+    from app.waha import WahaClient
+
+    client = WahaClient(base_url="http://waha:3000", api_key="k", session="engineering")
+    calls = []
+
+    def fake_request(method, path, body=None):
+        calls.append((method, path, body))
+        return {"id": "file-message"}
+
+    monkeypatch.setattr(client, "request", fake_request)
+    client.send_file(
+        "12036@g.us",
+        "http://app:8080/media/manual.pdf?t=signature",
+        mimetype="application/pdf",
+        filename="manual.pdf",
+    )
+
+    assert calls == [
+        (
+            "POST",
+            "/api/sendFile",
+            {
+                "session": "engineering",
+                "chatId": "12036@g.us",
+                "file": {
+                    "url": "http://app:8080/media/manual.pdf?t=signature",
+                    "mimetype": "application/pdf",
+                    "filename": "manual.pdf",
+                },
+            },
+        )
+    ]
+
+
 def test_shared_media_path_finds_file_in_volume(tmp_path):
     """Fallback: berkas WAHA di volume bersama bisa dibaca langsung."""
     from app.media import shared_media_path
@@ -512,6 +636,8 @@ def test_sheets_row_uses_only_requested_ticket_fields():
         "Grup",
         "Selesai",
         "Keterangan",
+        "Foto",
+        "Link Foto",
     ]
     assert len(row) == len(TICKET_HEADERS)
     assert row[:4] == [
